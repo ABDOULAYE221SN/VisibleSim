@@ -8,7 +8,7 @@ int main(int argc, char **argv) {
     try {
         createSimulator(argc, argv, MyMotionTestCode::buildNewBlockCode);
         getSimulator()->printInfo();
-        BaseSimulator::getWorld()->printInfo();
+        BaseSimulator::getScheduler()->start(0);
         deleteSimulator();
     } catch(std::exception const& e) {
         cerr << "Uncaught exception: " << e.what();

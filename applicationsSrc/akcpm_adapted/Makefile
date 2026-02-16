@@ -3,30 +3,33 @@ mkfile_path := $(abspath $(lastword $(MAKEFILE_LIST)))
 current_dir := $(notdir $(patsubst %/,%,$(dir $(mkfile_path))))
 APPDIR = ../../applicationsBin/$(current_dir)
 
-#####################################################################
+###########################################################################
 #
 # --- Sample User Makefile ---
 #
 # GLOBAL_LIBS, GLOBAL_INCLUDES and GLOBAL_CFLAGS are set by parent Makefile
 # HOWEVER: If calling make from the codeBlock directory (for more convenience to the user),
-#	these variables will be empty. Hence we test their value and if undefined,
-#	set them to predefined values.
+#     these variables will be empty. Hence we test their value and if undefined,
+#     set them to predefined values.
 #
 # You will find instructions below on how to edit the Makefile to fit your needs.
 #
 # SRCS contains all the sources of your codeBlocks
-SRCS =  catoms3DRotate.cpp catoms3DRotateCode.cpp
+SRCS = akcpm_adapted.cpp akcpmCode_adapted.cpp
 #
 # OUT is the output binary, where APPDIR is its enclosing directory
-OUT = $(APPDIR)/catoms3DRotate
+OUT = $(APPDIR)/akcpm_adapted
 #
-# MODULELIB is the library for your target module type: -lsim<module_name>
-MODULELIB = -lsimCatoms3D
+# MODULELIB is the library for your target module type: -lsimBlinkyBlocks
+MODULELIB = -lsimBlinkyBlocks
 # TESTS contains the commands that will be executed when `make test` is called
-TESTS = ../../utilities/blockCodeTest.sh catoms3DRotate $(OUT)
+TESTS = ../../utilities/blockCodeTest.sh akcpm_adapted $(OUT)
+#
+# CUSTOM_LIBS are the external dependencies of your blockcode, empty by default
+CUSTOM_LIBS = 
 #
 # End of Makefile section requiring input by user
-#####################################################################
+###########################################################################
 
 OBJS = $(SRCS:.cpp=.o)
 DEPS = $(SRCS:.cpp=.depends)
@@ -41,20 +44,23 @@ INCLUDES = -I. -I../../simulatorCore/src $(GLOBAL_INCLUDES)
 endif
 
 ifeq ($(GLOBAL_LIBS), )
-	ifeq ($(OS),Darwin)
-LIBS = -L./ -L../../simulatorCore/lib -L/usr/local/lib -lGLEW -lglut -framework GLUT -framework OpenGL -L/usr/X11/lib /usr/local/lib/libglut.dylib /usr/local/lib/libmuparser.dylib $(MODULELIB)
-	else
-LIBS = -L../../simulatorCore/lib -lglut -lGL -lGLU -lGLEW -lpthread -lm -ldl -lmuparser $(MODULELIB)
-	endif				#OS
+ifeq ($(OS),Darwin)
+LIBS = -L./ -L../../simulatorCore/lib -L/usr/local/lib $(MODULELIB) -lGLEW -lglut -framework GLUT -framework OpenGL -framework CoreFoundation -L/usr/X11/lib /usr/local/lib/libmuparser.a -lpthread
+else
+# CRITICAL: L'ordre est important! -lsimBlinkyBlocks DOIT venir AVANT les bibliothèques OpenGL
+LIBS = -L./ -L../../simulatorCore/lib -L/lib/x86_64-linux-gnu -L/usr/lib/x86_64-linux-gnu -L/usr/local/lib -L/opt/local/lib -L/usr/X11/lib $(MODULELIB) -lglut -lGL -lGLU -lGLEW -lpthread -lm -ldl -lmuparser
+endif
 else
 LIBS = $(GLOBAL_LIBS) -L../../simulatorCore/lib
-endif				#GLOBAL_LIBS
+endif
+
+LIBS += $(CUSTOM_LIBS)
 
 ifeq ($(GLOBAL_CCFLAGS),)
 CCFLAGS = -g -Wall -std=c++17 -Wsuggest-override -fno-stack-protector
-	ifeq ($(OS), Darwin)
-	CCFLAGS += -DGL_DO_NOT_WARN_IF_MULTI_GL_VERSION_HEADERS_INCLUDED -Wno-deprecated-declarations -Wno-overloaded-virtual
-	endif
+ifeq ($(OS), Darwin)
+CCFLAGS += -DGL_DO_NOT_WARN_IF_MULTI_GL_VERSION_HEADERS_INCLUDED -Wno-deprecated-declarations -Wno-overloaded-virtual
+endif
 else
 CCFLAGS = $(GLOBAL_CCFLAGS)
 endif
@@ -76,21 +82,16 @@ test:
 	@$(TESTS)
 
 autoinstall: $(OUT)
-	cp $(OUT)  $(APPDIR)
+	cp $(OUT) $(APPDIR)
 
 $(APPDIR)/$(OUT): $(OUT)
 
 $(OUT): $(SIMULATORLIB) $(OBJS)
-	$(CC) -o $(OUT) $(OBJS) \
-	-L../../simulatorCore/lib \
-	-lsimCatoms3D \
-	-lmuparser -lpthread -lm -ldl \
-	-lGLEW -lglut -lGLU -lGL
-
+	$(CC) -o $(OUT) $(OBJS) $(LIBS)
 
 ifneq ($(MAKECMDGOALS),clean)
 -include $(DEPS)
 endif
 
 clean:
-	rm -f *~ $(OBJS) $(OUT) $(DEPS)
+	rm -f *~ *.o $(OBJS) $(OUT) $(DEPS)

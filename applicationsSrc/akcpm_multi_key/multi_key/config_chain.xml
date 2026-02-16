@@ -1,0 +1,39 @@
+<?xml version="1.0" standalone="no" ?>
+<!-- 
+═══════════════════════════════════════════════════════════════════════════════
+AKC-PM Protocol Test - Chain Configuration
+═══════════════════════════════════════════════════════════════════════════════
+
+Linear chain to observe sequential authentication propagation.
+
+[iM] → [M1] → [M2] → [M3] → [M4] → [M5] → [M6] → [M7] → [M8] → [M9]
+
+Authentication propagates step by step:
+1. iM (BLUE) sends STRUCTURE_READY to M1
+2. M1 authenticates with iM → becomes GREEN → sends STRUCTURE_READY to M2
+3. M2 authenticates with M1 → becomes GREEN → sends STRUCTURE_READY to M3
+... and so on
+
+═══════════════════════════════════════════════════════════════════════════════
+-->
+
+<world gridSize="30,20,10" windowSize="1800,900">
+    <camera target="100,50,10" directionSpherical="0,30,150" angle="45"/>
+    <spotlight target="100,50,10" directionSpherical="45,60,100" angle="40"/>
+    
+    <blockList color="128,128,128" blockSize="1.0,1.0,1.0">
+        
+        <!-- Linear chain along X axis -->
+        <block position="5,5,0" />    <!-- ★ INITIAL MODULE (iM) ★ -->
+        <block position="6,5,0" />    <!-- M1 -->
+        <block position="7,5,0" />    <!-- M2 -->
+        <block position="8,5,0" />    <!-- M3 -->
+        <block position="9,5,0" />    <!-- M4 -->
+        <block position="10,5,0" />   <!-- M5 -->
+        <block position="11,5,0" />   <!-- M6 -->
+        <block position="12,5,0" />   <!-- M7 -->
+        <block position="13,5,0" />   <!-- M8 -->
+        <block position="14,5,0" />   <!-- M9 -->
+        
+    </blockList>
+</world>

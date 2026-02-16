@@ -1,0 +1,38 @@
+<?xml version="1.0" standalone="no" ?>
+<!-- 
+═══════════════════════════════════════════════════════════════════════════════
+AKC-PM Protocol Test - Simple 3x3 Grid
+═══════════════════════════════════════════════════════════════════════════════
+
+Simple flat structure for testing Algorithm 1 authentication cascade.
+
+     [M] [M] [M]
+     [M][iM][M]    iM = Initial Module (5,5,0) - BLUE
+     [M] [M] [M]
+
+Expected result: All modules turn GREEN after authentication cascade.
+
+═══════════════════════════════════════════════════════════════════════════════
+-->
+
+<world gridSize="20,20,10" windowSize="1800,900">
+    <camera target="50,50,10" directionSpherical="0,60,80" angle="45"/>
+    <spotlight target="50,50,10" directionSpherical="45,60,60" angle="40"/>
+    
+    <blockList color="128,128,128" blockSize="1.0,1.0,1.0">
+        
+        <!-- 3x3 Grid on Z=0 -->
+        <block position="4,4,0" />
+        <block position="5,4,0" />
+        <block position="6,4,0" />
+        
+        <block position="4,5,0" />
+        <block position="5,5,0" />   <!-- ★ INITIAL MODULE (iM) ★ -->
+        <block position="6,5,0" />
+        
+        <block position="4,6,0" />
+        <block position="5,6,0" />
+        <block position="6,6,0" />
+        
+    </blockList>
+</world>

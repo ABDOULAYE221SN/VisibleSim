@@ -1,0 +1,22 @@
+<?xml version="1.0" standalone="no" ?>
+<vs>
+    <visuals>
+        <window size="1600x900" backgroundColor="0xffffff" gradientColor="0xddddff"/>
+        <render shadows="true" grid="true"/>
+    </visuals>
+
+    <world gridSize="6,6,6">
+        <camera target="2,2,2" thetaPhiDist="40,35,18" fov="50" near="0.1" far="1000"/>
+        <spotlight target="2,2,2" thetaPhiDist="60,30,25" fov="30" show="0" near="5" far="60"/>
+
+        <blockList type="catoms3D" lattice="FCC" color="180,180,180">
+            <!-- Module 1 = iM (initial), position sans mouvement -->
+            <block id="1" position="2,2,3" orientation="0"/>
+            
+            <!-- Modules mobiles aux positions avec mouvements -->
+            <block id="2" position="1,3,2" orientation="0" mobile="true"/>
+            <block id="3" position="3,3,2" orientation="0" mobile="true"/>
+            <block id="4" position="2,3,2" orientation="0" mobile="true"/>
+        </blockList>
+    </world>
+</vs>

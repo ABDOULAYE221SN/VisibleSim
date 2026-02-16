@@ -15,15 +15,15 @@ APPDIR = ../../applicationsBin/$(current_dir)
 # You will find instructions below on how to edit the Makefile to fit your needs.
 #
 # SRCS contains all the sources of your codeBlocks
-SRCS =  catoms3DRotate.cpp catoms3DRotateCode.cpp
+SRCS =  exemple.cpp exempleCode.cpp
 #
 # OUT is the output binary, where APPDIR is its enclosing directory
-OUT = $(APPDIR)/catoms3DRotate
+OUT = $(APPDIR)/exemple
 #
 # MODULELIB is the library for your target module type: -lsim<module_name>
-MODULELIB = -lsimCatoms3D
+MODULELIB = -lsimBlinkyBlocks
 # TESTS contains the commands that will be executed when `make test` is called
-TESTS = ../../utilities/blockCodeTest.sh catoms3DRotate $(OUT)
+TESTS = ../../utilities/blockCodeTest.sh exemple $(OUT)
 #
 # End of Makefile section requiring input by user
 #####################################################################
@@ -44,7 +44,7 @@ ifeq ($(GLOBAL_LIBS), )
 	ifeq ($(OS),Darwin)
 LIBS = -L./ -L../../simulatorCore/lib -L/usr/local/lib -lGLEW -lglut -framework GLUT -framework OpenGL -L/usr/X11/lib /usr/local/lib/libglut.dylib /usr/local/lib/libmuparser.dylib $(MODULELIB)
 	else
-LIBS = -L../../simulatorCore/lib -lglut -lGL -lGLU -lGLEW -lpthread -lm -ldl -lmuparser $(MODULELIB)
+LIBS = -L./ -L../../simulatorCore/lib -L/usr/local/lib -L/opt/local/lib -L/usr/X11/lib -lglut -lGL -lGLU -lGLEW -lpthread -lm -ldl -lmuparser $(MODULELIB)
 	endif				#OS
 else
 LIBS = $(GLOBAL_LIBS) -L../../simulatorCore/lib
@@ -81,12 +81,7 @@ autoinstall: $(OUT)
 $(APPDIR)/$(OUT): $(OUT)
 
 $(OUT): $(SIMULATORLIB) $(OBJS)
-	$(CC) -o $(OUT) $(OBJS) \
-	-L../../simulatorCore/lib \
-	-lsimCatoms3D \
-	-lmuparser -lpthread -lm -ldl \
-	-lGLEW -lglut -lGLU -lGL
-
+	$(CC) -o $(OUT) $(OBJS) $(LIBS)
 
 ifneq ($(MAKECMDGOALS),clean)
 -include $(DEPS)

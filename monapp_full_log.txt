@@ -1,0 +1,24 @@
+[1;33mAKC-PM SINGLE_KEY + Reconfiguration[0m
+[1;31merror (CLI): [0mUnknown command line argument provided: (-p)
+
+
+[1;37mVisibleSim options:[0m
+	 [1;35m-f [0m			Full screen mode
+	 [1;35m-c <config>[0m		Path to the XML configuration file
+	 [1;35m-r [0m			Run realtime mode on startup: simulation time reflects real time elapsed
+	 [1;35m-R [0m			Run fastest mode on startup: scheduler executes all events as fast as possible
+	 [1;35m-x [0m			Terminate simulation when scheduler ends (has no effect in terminal mode)
+	 [1;35m-t [0m			Terminal mode only (no graphical output)
+	 [1;35m-s [<maxDate> | inf] [0m	Scheduler mode:	(Default) Stop simulation when event list is empty
+		 [1;35m(maxDate)[0m	in microseconds, the scheduler will stop when the event list is empty, or when the maximum date has been reached
+		 [1;35minf[0m		the simulation will have an infinite duration and can only be stopped when the user presses the 'Q' key
+	 [1;35m-k [0m			Module type for generic Block Code execution. Options: {BB, RB, SB, C2D, C3D, MR}
+	 [1;35m-g [0m			Enable regression testing (export terminal configuration)
+	 [1;35m-l [0m			Enable printing of log information to file simulation.log
+	 [1;35m-i [0m			Enable printing more detailed simulation stats
+	 [1;35m-a <seed>[0m		Set simulation seed
+	 [1;35m-e [0m			Export configuration when simulation finishes
+	 [1;35m--replay <export> [0m			Enables replay export <export> is the name of the export file
+	 [1;35m--replay-min-delay <delay>[0m			in microsecond, minimum delay between two export keyframes (advanced)
+	 [1;35m--debug-replay[0m			Create a text file for the export replay file (used for debugging purpose)
+	 [1;35m-h [0m			Help

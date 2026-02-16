@@ -1,0 +1,58 @@
+<?xml version="1.0" standalone="no" ?>
+<!--
+╔═══════════════════════════════════════════════════════════════════════════╗
+║          PROTOCOLE AKC-PM - MODÈLE SINGLE_KEY AVEC MOUVEMENTS            ║
+║                                                                           ║
+║  Configuration de test pour la reconfiguration de modules                ║
+║  Les modules s'authentifient d'abord, puis se déplacent                  ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+-->
+<vs>
+
+    <!-- ================= VISUALISATION ================= -->
+    <visuals>
+        <window size="1600x900"
+                backgroundColor="0xffffff"
+                gradientColor="0xddddff"/>
+        <render shadows="true" grid="true"/>
+    </visuals>
+
+    <!-- ================= WORLD ================= -->
+    <world gridSize="10,10,6">
+
+        <!-- ===== Camera ===== -->
+        <camera target="5,5,2"
+                thetaPhiDist="40,35,25"
+                fov="50"
+                near="0.1"
+                far="1000"/>
+
+        <!-- ===== Light ===== -->
+        <spotlight target="5,5,2"
+                   thetaPhiDist="60,30,30"
+                   fov="30"
+                   show="0"
+                   near="5"
+                   far="60"/>
+
+        <!-- ================= CATOMS 3D ================= -->
+        <blockList type="catoms3D" lattice="FCC" color="180,180,180">
+
+            <!-- ====== Configuration initiale ====== -->
+            <!-- Module 1: Module initial (iM) - BLEU -->
+            <block id="1" position="5,5,0" orientation="0"/>
+            
+            <!-- Module 2: Mobile -->
+            <block id="2" position="5,6,0" orientation="0" mobile="true"/>
+            
+            <!-- Module 3: Mobile -->
+            <block id="3" position="6,5,0" orientation="0" mobile="true"/>
+            
+            <!-- Module 4: Mobile -->
+            <block id="4" position="5,4,0" orientation="0" mobile="true"/>
+
+        </blockList>
+
+    </world>
+
+</vs>
