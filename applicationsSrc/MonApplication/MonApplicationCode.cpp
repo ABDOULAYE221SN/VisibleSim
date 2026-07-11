@@ -1,588 +1,556 @@
+/**
+ * MonApplicationCode.cpp
+ * Protocole AKC-PM — 6 modules, reconfiguration sequentielle
+ * Tout module authentifie peut verifier une demande d'authentification
+ */
 #include "MonApplicationCode.hpp"
+#include "../../simulatorCore/src/spongent160.h"
 #include <algorithm>
 #include <random>
+#include <iomanip>
+#include <sstream>
+#include <fstream>
+#include <stdexcept>
+#include <sys/stat.h>
+#if defined(__linux__)
+#  include <unistd.h>
+#elif defined(__APPLE__)
+#  include <mach-o/dyld.h>
+#endif
+
+// ---------------------------------------------------------------------------
+// Lecture réelle du binaire en mémoire pour L(i)
+// ---------------------------------------------------------------------------
+// Charge les NB_LIGNES_CODE*BYTES_PER_LINE premiers octets du binaire courant
+// en les découpant en blocs de BYTES_PER_LINE = TAILLE_LIGNE_BITS/8 octets.
+// Chaque appel à L(i) renvoie le bloc i, exactement comme décrit dans le papier.
+// ---------------------------------------------------------------------------
+static constexpr int BYTES_PER_LINE = 256 / 8;   // = 32 octets
+
+static const std::vector<uint8_t>& getBinaryCodeSegment() {
+    static std::vector<uint8_t> cache;
+    if (!cache.empty()) return cache;
+
+    // Obtenir le chemin du binaire en cours d'exécution
+    std::string path;
+#if defined(__linux__)
+    char buf[4096] = {};
+    ssize_t len = ::readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+    if (len > 0) path = std::string(buf, len);
+#elif defined(__APPLE__)
+    char buf[4096] = {};
+    uint32_t size = sizeof(buf);
+    if (_NSGetExecutablePath(buf, &size) == 0) path = std::string(buf);
+#endif
+
+    if (path.empty()) {
+        // Fallback : remplir avec des zéros si le chemin est inaccessible
+        cache.assign(NB_LIGNES_CODE * BYTES_PER_LINE, 0);
+        return cache;
+    }
+
+    std::ifstream f(path, std::ios::binary);
+    if (!f) {
+        cache.assign(NB_LIGNES_CODE * BYTES_PER_LINE, 0);
+        return cache;
+    }
+
+    // Lire la taille du fichier
+    f.seekg(0, std::ios::end);
+    std::streamsize fileSize = f.tellg();
+    f.seekg(0, std::ios::beg);
+
+    std::streamsize needed = NB_LIGNES_CODE * BYTES_PER_LINE;
+    std::streamsize toRead = std::min(needed, fileSize);
+
+    cache.resize(needed, 0);
+    f.read(reinterpret_cast<char*>(cache.data()), toRead);
+    // Les octets restants (si le binaire est trop petit) restent à 0
+    return cache;
+}
 
 using namespace std;
 
-// === VARIABLES STATIQUES RECONFIGURATION ===
-static vector<Cell3DPosition> initialShape = {
-    Cell3DPosition(1,3,2),  // M1
-    Cell3DPosition(2,3,2),  // M2
-    Cell3DPosition(1,2,2),  // M3
-    Cell3DPosition(2,2,2),  // M4
-    Cell3DPosition(3,2,2),  // M5
+// --- Positions initiales ---
+static const Cell3DPosition POS_A(2,3,2);   // -> TARGET_A
+static const Cell3DPosition POS_B(3,3,2);   // -> TARGET_B
+static const Cell3DPosition POS_C(4,3,2);   // module initial (iM) -> TARGET_IM
+static const Cell3DPosition POS_D(2,2,2);   // -> TARGET_D
+static const Cell3DPosition POS_E(3,2,2);   // -> TARGET_E
+static const Cell3DPosition POS_F(4,2,2);   // -> TARGET_F
+
+// --- Positions cibles ---
+static const Cell3DPosition TARGET_A (5,3,2);
+static const Cell3DPosition TARGET_B (6,1,2);
+static const Cell3DPosition TARGET_D (6,3,2);
+static const Cell3DPosition TARGET_E (6,2,2);
+static const Cell3DPosition TARGET_F (6,0,2);
+static const Cell3DPosition TARGET_IM(7,3,2);
+
+// Ordre de deplacement : A, D, E, B, F, puis iM en dernier
+static const Cell3DPosition MOVE_ORDER[] = {
+    POS_A, POS_D, POS_E, POS_B, POS_F
 };
+static const int NB_MOVERS = 5;
 
-static vector<Cell3DPosition> targetShape = {
-    Cell3DPosition(2,3,2),  // M2 reste
-    Cell3DPosition(2,2,2),  // M4 reste
-    Cell3DPosition(3,2,2),  // M5 reste
-    Cell3DPosition(3,3,2),  // M1 va ici
-    Cell3DPosition(2,2,3),  // M3 monte ici
-};
+static bool reconfigStarted  = false;
+static int  nextMoverIndex   = 0;   // indice dans MOVE_ORDER
 
-static queue<bID> moveQueue;
-static bool planReady = false;
-static map<bID, Cell3DPosition> assignments;
-
-// === CONTROLE DES PHASES ===
-static int authenticatedCount = 0;
-static set<bID> authenticatedModules;  // Pour éviter les doubles comptages
-static const int TOTAL_MODULES = 5;
-static bool reconfigStarted = false;
-
-static bool isInShape(const Cell3DPosition &pos, const vector<Cell3DPosition> &shape) {
-    return find(shape.begin(), shape.end(), pos) != shape.end();
+static string hexShort(const vector<uint8_t>& v, int n = 4) {
+    ostringstream ss;
+    ss << hex << uppercase;
+    for (int i = 0; i < n && i < (int)v.size(); i++)
+        ss << setw(2) << setfill('0') << (int)v[i];
+    ss << "...";
+    return ss.str();
 }
 
-// === CONSTRUCTEUR / DESTRUCTEUR ===
+static bool ifaceValide(P2PNetworkInterface* iface, BuildingBlock* self) {
+    if (!iface || !iface->connectedInterface) return false;
+    if (!iface->connectedInterface->hostBlock) return false;
+    if (iface->connectedInterface->hostBlock == self) return false;
+    if (iface->connectedInterface->hostBlock->blockId == self->blockId) return false;
+    if (iface->connectedInterface->hostBlock->position == self->position) return false;
+    return true;
+}
 
-MonApplicationCode::MonApplicationCode(Catoms3DBlock *host) 
+MonApplicationCode::MonApplicationCode(Catoms3DBlock *host)
     : Catoms3DBlockCode(host), module(host) {}
+MonApplicationCode::~MonApplicationCode() {}
 
-MonApplicationCode::~MonApplicationCode() {
-    clesVoisins.clear();
-    voisinsAuthentifies.clear();
-    voisinsDansStructure.clear();
-    authentificationsEnCours.clear();
-    n0EnAttente.clear();
+vector<uint8_t> MonApplicationCode::H(const vector<uint8_t>& data) {
+    return Spongent::Spongent160::hash(data);
 }
-
-// === FONCTIONS CRYPTOGRAPHIQUES AKC-PM ===
-
-uint64_t MonApplicationCode::H(uint64_t valeur) {
-    uint64_t hash = 5381;
-    for (int i = 0; i < 8; i++) {
-        hash = ((hash << 5) + hash) + ((valeur >> (i * 8)) & 0xFF);
-    }
-    return hash;
+vector<uint8_t> MonApplicationCode::H(uint64_t val) {
+    vector<uint8_t> v(8);
+    for (int i = 0; i < 8; i++) v[i] = (uint8_t)((val >> (i*8)) & 0xFF);
+    return H(v);
 }
-
-uint64_t MonApplicationCode::H(const vector<uint8_t>& donnees) {
-    uint64_t hash = 5381;
-    for (auto octet : donnees) {
-        hash = ((hash << 5) + hash) + octet;
-    }
-    return hash;
+vector<uint8_t> MonApplicationCode::L(int ligne) {
+    // Lecture réelle du binaire en mémoire (plus de simulation LCG)
+    const auto& seg = getBinaryCodeSegment();
+    int idx = ((ligne % NB_LIGNES_CODE) + NB_LIGNES_CODE) % NB_LIGNES_CODE;
+    int offset = idx * BYTES_PER_LINE;
+    return vector<uint8_t>(seg.begin() + offset, seg.begin() + offset + BYTES_PER_LINE);
 }
-
-vector<uint8_t> MonApplicationCode::L(int numeroLigne) {
-    vector<uint8_t> ligne(TAILLE_LIGNE_BITS / 8);
-    uint64_t graine = 0xDEADBEEF ^ (numeroLigne * 0x12345678);
-    for (size_t i = 0; i < ligne.size(); i++) {
-        graine = graine * 1103515245 + 12345;
-        ligne[i] = (graine >> 16) & 0xFF;
-    }
-    return ligne;
+vector<uint8_t> MonApplicationCode::HL(const vector<uint8_t>& n) {
+    uint64_t val = 0;
+    for (int i = 0; i < 8 && i < (int)n.size(); i++)
+        val |= ((uint64_t)n[i]) << (i*8);
+    return HL(val);
 }
-
 vector<uint8_t> MonApplicationCode::HL(uint64_t n) {
-    int numeroLigne = n % NB_LIGNES_CODE;
-    vector<uint8_t> ligne = L(numeroLigne);
-    uint64_t hash = H(ligne);
-    vector<uint8_t> resultat(8);
-    for (int i = 0; i < 8; i++) {
-        resultat[i] = (hash >> (i * 8)) & 0xFF;
-    }
-    return resultat;
+    return H(L((int)(n % NB_LIGNES_CODE)));
 }
-
-uint64_t MonApplicationCode::XOR(uint64_t a, uint64_t b) {
-    return a ^ b;
+vector<uint8_t> MonApplicationCode::xorVec(const vector<uint8_t>& a, const vector<uint8_t>& b) {
+    vector<uint8_t> res(a.size());
+    for (size_t i = 0; i < a.size(); i++) res[i] = a[i] ^ b[i % b.size()];
+    return res;
 }
-
-uint64_t MonApplicationCode::genererNonce() {
+vector<uint8_t> MonApplicationCode::genererNonce160() {
     static random_device rd;
     static mt19937_64 gen(rd());
     uniform_int_distribution<uint64_t> dis;
-    return dis(gen);
+    vector<uint8_t> n(HASH_OUTPUT_BYTES);
+    for (int i = 0; i < HASH_OUTPUT_BYTES; i += 8) {
+        uint64_t v = dis(gen);
+        for (int j = 0; j < 8 && i+j < HASH_OUTPUT_BYTES; j++)
+            n[i+j] = (uint8_t)((v >> (j*8)) & 0xFF);
+    }
+    return n;
+}
+vector<uint8_t> MonApplicationCode::tsVersVec(uint64_t ts) {
+    uint64_t Ts = ts / DIVISEUR_SYNC;
+    vector<uint8_t> v(HASH_OUTPUT_BYTES, 0);
+    for (int i = 0; i < 8; i++) v[i] = (uint8_t)((Ts >> (i*8)) & 0xFF);
+    return v;
 }
 
-// === FONCTIONS UTILITAIRES AKC-PM ===
-
 bool MonApplicationCode::estDansStructure() const {
-    return infoSecurite.etat == ETAT_AUTHENTIFIE ||
-           infoSecurite.etat == ETAT_CLE_ETABLIE ||
-           infoSecurite.estModuleInitial;
+    return infoSecurite.estModuleInitial ||
+           infoSecurite.etat == ETAT_AUTHENTIFIE ||
+           infoSecurite.etat == ETAT_CLE_ETABLIE;
 }
 
 void MonApplicationCode::definirCommeModuleInitial() {
     infoSecurite.estModuleInitial = true;
-    infoSecurite.etat = ETAT_AUTHENTIFIE;
-    infoSecurite.liensStructure = 0;
-    
+    infoSecurite.etat             = ETAT_AUTHENTIFIE;
+    infoSecurite.liensStructure   = 0;
     module->setColor(BLUE);
-    
-    console << "  MODULE " << module->blockId << " DEFINI COMME INITIAL (iM) \n";
-    console << "  Modele: SINGLE_KEY (cle unique pour tout le reseau)\n";
+    console << "[iM] Module " << module->blockId << " designe module initial (BLEU)\n";
 }
 
-// === STARTUP ===
 
 void MonApplicationCode::startup() {
-    // Planification (Module 1)
-    if (!planReady && module->blockId == 1) {
-        vector<Cell3DPosition> toRemove, toFill;
-        
-        for (auto &pos : initialShape)
-            if (!isInShape(pos, targetShape)) toRemove.push_back(pos);
-        for (auto &pos : targetShape)
-            if (!isInShape(pos, initialShape)) toFill.push_back(pos);
+    isReturning = false;
+    authFailed  = false;
 
-        auto world = BaseSimulator::getWorld();
-        for (size_t i = 0; i < toRemove.size() && i < toFill.size(); i++) {
-            for (auto &pair : world->buildingBlocksMap) {
-                if (pair.second->position == toRemove[i]) {
-                    assignments[pair.first] = toFill[i];
-                    moveQueue.push(pair.first);
-                    break;
-                }
-            }
-        }
-        planReady = true;
-    }
-
-    // Module initial
-    if (module->position == Cell3DPosition(2,2,2)) {
+    if (module->position == POS_C) {
+        // Module initial
         definirCommeModuleInitial();
         getScheduler()->schedule(
-            new InterruptionEvent<unsigned int>(getScheduler()->now(), module, 0));
-        
-        if (authenticatedModules.find(module->blockId) == authenticatedModules.end()) {
-            authenticatedModules.insert(module->blockId);
-            authenticatedCount++;
-        }
+            new InterruptionEvent<unsigned int>(getScheduler()->now() + 100, module, 0));
+        myTarget = TARGET_IM;
     } else {
         module->setColor(GREY);
-    }
-
-    // Configuration modules mobiles
-    if (planReady && assignments.count(module->blockId)) {
-        myTarget = assignments[module->blockId];
+        console << "[t=" << getScheduler()->now() << "] M" << module->blockId
+                << " en attente (GRIS)\n";
+        // Assigner la cible selon la position initiale
+        if      (module->position == POS_A) myTarget = TARGET_A;
+        else if (module->position == POS_B) myTarget = TARGET_B;
+        else if (module->position == POS_D) myTarget = TARGET_D;
+        else if (module->position == POS_E) myTarget = TARGET_E;
+        else if (module->position == POS_F) myTarget = TARGET_F;
     }
 }
 
-// === ALGORITHME 1 AKC-PM ===
-
+// SF-1/SF-2 : authentification normale
 void MonApplicationCode::algorithme1_Initier(P2PNetworkInterface* dest) {
-    console << "Module " << module->blockId << ": ALGORITHME 1 - INITIATION (SF-1, SF-2)\n";
-    
-    if (voisinsAuthentifies.find(dest) != voisinsAuthentifies.end()) {
-        console << "  REJETE: Ce voisin est deja authentifie\n";
-        return;
-    }
-    
-    if (authentificationsEnCours.find(dest) != authentificationsEnCours.end()) {
-        console << "  REJETE: Authentification deja en cours avec ce voisin\n";
-        return;
-    }
-    
-    infoSecurite.n0 = genererNonce();
+    if (voisinsAuthentifies.count(dest) || authentificationsEnCours.count(dest)) return;
+
+    infoSecurite.n0 = genererNonce160();
     infoSecurite.n1 = H(infoSecurite.n0);
     infoSecurite.K0 = HL(infoSecurite.n0);
-    
-    uint64_t ts_brut = getScheduler()->now();
-    uint64_t Ts = ts_brut / DIVISEUR_SYNC;
-    uint64_t x = XOR(Ts, infoSecurite.n0);
-    
-    console << "  n0 = " << infoSecurite.n0 << " (secret)\n";
-    console << "  n1 = H(n0) = " << infoSecurite.n1 << "\n";
-    console << "  ts = " << ts_brut << ", Ts = ts/10 = " << Ts << "\n";
-    console << "  x = Ts XOR n0 = " << x << "\n";
-    
-    int liens = (infoSecurite.liensStructure > 0) ? infoSecurite.liensStructure : 1;
-    
-    MessageDemandeAuth* msg = new MessageDemandeAuth(liens, infoSecurite.n1, x, infoSecurite.K0);
-    sendMessage(msg, dest, DELAI_TRANSMISSION, 0);
-    
+
+    uint64_t ts = getScheduler()->now();
+    vector<uint8_t> x = xorVec(tsVersVec(ts), infoSecurite.n0);
+    bID destId = dest->connectedInterface->hostBlock->blockId;
+
+    console << "\n[t=" << ts << "] *** ALGO1 SF-1 — M" << module->blockId << " (nM) ***\n";
+    console << "  n0  = " << hexShort(infoSecurite.n0) << " (nonce secret)\n";
+    console << "  n1  = H(n0)         = " << hexShort(infoSecurite.n1) << "\n";
+    console << "  K0  = HL(n0 mod Nb) = " << hexShort(infoSecurite.K0) << " (preuve de code)\n";
+    console << "  Ts  = " << (ts / DIVISEUR_SYNC) << "\n";
+    console << "  x   = Ts XOR n0     = " << hexShort(x) << "\n";
+    console << "  >>> SF-2 : M" << module->blockId << " envoie AUTH_REQUEST a M" << destId << "\n";
+    console << "             MSG = (n1=" << hexShort(infoSecurite.n1)
+            << ", x=" << hexShort(x) << ", K0=" << hexShort(infoSecurite.K0) << ")\n";
+
+    sendMessage(new MessageDemandeAuth(infoSecurite.liensStructure,
+                                       infoSecurite.n1, x, infoSecurite.K0),
+                dest, DELAI_TRANSMISSION, 0);
     n0EnAttente[dest] = infoSecurite.n0;
     authentificationsEnCours.insert(dest);
     infoSecurite.etat = ETAT_AUTHENTIFICATION;
-    
-    console << "  → Message AUTH_REQUEST envoye (liens=" << liens << ")\n";
+    module->setColor(ORANGE);
 }
 
-void MonApplicationCode::algorithme1_Verifier(P2PNetworkInterface* src, int liens, 
-                                               uint64_t n1, uint64_t x, 
+
+// SF-3/SF-4 : tout module authentifie peut verifier
+void MonApplicationCode::algorithme1_Verifier(P2PNetworkInterface* src, int /*liens*/,
+                                               const vector<uint8_t>& n1,
+                                               const vector<uint8_t>& x,
                                                const vector<uint8_t>& K0) {
-    console << "Module " << module->blockId << ": ALGORITHME 1 - VERIFICATION (SF-3, SF-4)\n";
-    
-    if (voisinsAuthentifies.find(src) != voisinsAuthentifies.end()) {
-        console << "  REJETE: Ce voisin est deja authentifie\n";
-        return;
-    }
-    
+    if (voisinsAuthentifies.count(src)) return;
     if (!estDansStructure()) {
-        console << "  REJETE: Pas dans la structure\n";
+        console << "[Algo1 SF-3] REJETE: verificateur pas dans la structure\n";
+        sendMessage(new MessageAuthEchec(), src, DELAI_TRANSMISSION, 0);
         return;
     }
-    
+
+    bID srcId = src->connectedInterface->hostBlock->blockId;
     uint64_t Tr = getScheduler()->now();
-    uint64_t n0_prime = 0;
-    bool syncOK = false;
+
+    console << "\n[t=" << Tr << "] *** ALGO1 SF-3 — M" << module->blockId
+            << " (verificateur) recoit AUTH_REQUEST de M" << srcId << " ***\n";
+    console << "  MSG recu : n1=" << hexShort(n1)
+            << ", x=" << hexShort(x) << ", K0=" << hexShort(K0) << "\n";
+
     uint64_t Ts_base = (Tr - DELAI_TRANSMISSION) / DIVISEUR_SYNC;
-    
-    console << "  Tr = " << Tr << ", Δt = " << DELAI_TRANSMISSION << "\n";
-    console << "  Ts_base = (Tr - Δt)/10 = " << Ts_base << "\n";
-    
-    for (int offset = -TOLERANCE_SYNC; offset <= TOLERANCE_SYNC && !syncOK; offset++) {
-        uint64_t Ts_test = Ts_base + offset;
-        uint64_t n0_test = XOR(x, Ts_test);
-        uint64_t n1_calcule = H(n0_test);
-        
-        if (n1_calcule == n1) {
-            n0_prime = n0_test;
-            syncOK = true;
-            console << "   Sync OK (offset=" << offset << ", Ts=" << Ts_test << ")\n";
-        }
+    vector<uint8_t> n0_prime;
+    bool syncOK = false;
+    int offset_ok = 0;
+
+    console << "  Verification sync (Ts_base=" << Ts_base
+            << ", tolerance=+-" << TOLERANCE_SYNC << ") ...\n";
+
+    for (int off = -TOLERANCE_SYNC; off <= TOLERANCE_SYNC && !syncOK; off++) {
+        uint64_t Ts_test = Ts_base + (uint64_t)off;
+        vector<uint8_t> Ts_vec(HASH_OUTPUT_BYTES, 0);
+        for (int i = 0; i < 8; i++)
+            Ts_vec[i] = (uint8_t)((Ts_test >> (i*8)) & 0xFF);
+        vector<uint8_t> n0_test = xorVec(x, Ts_vec);
+        if (H(n0_test) == n1) { n0_prime = n0_test; syncOK = true; offset_ok = off; }
     }
-    
+
     if (!syncOK) {
-        console << "   ECHEC SYNC: Impossible de verifier n1 = H(n0')\n";
+        console << "  [ECHEC] Synchronisation impossible\n";
+        console << "  >>> AUTH_ECHEC envoye a M" << srcId << "\n";
+        sendMessage(new MessageAuthEchec(), src, DELAI_TRANSMISSION, 0);
         return;
     }
-    
-    console << "  n0' (recupere) = " << n0_prime << "\n";
-    
-    vector<uint8_t> K0_calcule = HL(n0_prime);
-    if (K0_calcule != K0) {
-        console << "   ECHEC AUTH: K0 ne correspond pas\n";
+    console << "  Sync OK (offset=" << offset_ok << ") : n0' = " << hexShort(n0_prime) << "\n";
+    console << "  Verification K0 : HL(n0' mod Nb) =? K0 ...\n";
+
+    if (HL(n0_prime) != K0) {
+        console << "  [ECHEC] K0 invalide — HL(n0')=" << hexShort(HL(n0_prime))
+                << " != K0=" << hexShort(K0) << "\n";
+        console << "  >>> AUTH_ECHEC envoye a M" << srcId << "\n";
+        sendMessage(new MessageAuthEchec(), src, DELAI_TRANSMISSION, 0);
         return;
     }
-    
-    console << "   K0 verifie - Module authentifie!\n";
-    
-    uint64_t n2;
-    if (infoSecurite.n2 != 0) {
-        n2 = infoSecurite.n2;
-        console << "  [SINGLE KEY] Utilisation du n2 local = " << n2 << "\n";
-    } else if (infoSecurite.estModuleInitial) {
-        n2 = genererNonce();
-        infoSecurite.n2 = n2;
-        console << "  n2 genere par le module initial = " << n2 << "\n";
+    console << "  K0 valide : meme code confirme\n";
+
+    if (infoSecurite.n2.empty()) {
+        infoSecurite.n2 = genererNonce160();
+        console << "  n2 genere = " << hexShort(infoSecurite.n2) << " (SINGLE_KEY)\n";
     } else {
-        console << "  ERREUR: Module non-initial sans n2!\n";
-        return;
+        console << "  n2 existant = " << hexShort(infoSecurite.n2) << " (SINGLE_KEY partage)\n";
     }
-    
-    uint64_t x1 = XOR(n2, n0_prime);
-    vector<uint8_t> K1 = HL(n2);
-    
-    console << "  n2 = " << n2 << "\n";
-    console << "  x1 = n2 XOR n0' = " << x1 << "\n";
-    
-    clesVoisins[src] = K1;
+
+    vector<uint8_t> x1 = xorVec(infoSecurite.n2, n0_prime);
+    vector<uint8_t> K1 = HL(infoSecurite.n2);
+
+    clesVoisins[src]         = K1;
     voisinsAuthentifies[src] = true;
-    voisinsDansStructure[src] = true;
     infoSecurite.liensStructure++;
-    
-    MessageDefiCle* msg = new MessageDefiCle(x1);
-    sendMessage(msg, src, DELAI_TRANSMISSION, 0);
-    
-    console << "  → Message KEY_CHALLENGE envoye\n";
+
+    console << "  K1 = HL(n2 mod Nb) = " << hexShort(K1) << "\n";
+    console << "  x1 = n2 XOR n0'    = " << hexShort(x1) << "\n";
+    console << "  >>> SF-4 : M" << module->blockId
+            << " envoie KEY_CHALLENGE(x1=" << hexShort(x1) << ") a M" << srcId << "\n";
+
+    sendMessage(new MessageDefiCle(x1), src, DELAI_TRANSMISSION, 0);
 }
 
-void MonApplicationCode::algorithme1_Completer(P2PNetworkInterface* src, uint64_t x1) {
-    console << "Module " << module->blockId << ": ALGORITHME 1 - COMPLETION (SF-5)\n";
-    
-    if (voisinsAuthentifies.find(src) != voisinsAuthentifies.end()) {
-        console << "  REJETE: Ce voisin est deja authentifie\n";
-        return;
-    }
-    
-    if (n0EnAttente.find(src) == n0EnAttente.end()) {
-        console << "  ERREUR: Pas d'authentification en cours\n";
-        return;
-    }
-    
-    uint64_t n0 = n0EnAttente[src];
-    uint64_t n2 = XOR(x1, n0);
+// SF-5 : nM complete l'authentification
+void MonApplicationCode::algorithme1_Completer(P2PNetworkInterface* src,
+                                                const vector<uint8_t>& x1) {
+    if (voisinsAuthentifies.count(src)) return;
+    if (!n0EnAttente.count(src)) return;
+
+    bID srcId = src->connectedInterface->hostBlock->blockId;
+    uint64_t t = getScheduler()->now();
+
+    vector<uint8_t> n0 = n0EnAttente[src];
+    vector<uint8_t> n2 = xorVec(x1, n0);
     vector<uint8_t> K1 = HL(n2);
-    
-    console << "  n2 = x1 XOR n0 = " << n2 << "\n";
-    console << "  K1 = H(L(n2 mod Nb)) generee\n";
-    
-    infoSecurite.n2 = n2;
-    infoSecurite.K1 = K1;
-    clesVoisins[src] = K1;
+
+    console << "\n[t=" << t << "] *** ALGO1 SF-5 — M" << module->blockId
+            << " recoit KEY_CHALLENGE de M" << srcId << " ***\n";
+    console << "  x1 recu = " << hexShort(x1) << "\n";
+    console << "  n2 = x1 XOR n0 = " << hexShort(n2) << "\n";
+    console << "  K1 = HL(n2 mod Nb) = " << hexShort(K1) << "\n";
+    console << "  ==> Cle K1 partagee etablie\n";
+    console << "  ==> AUTHENTIFICATION REUSSIE — M" << module->blockId << " devient VERT\n";
+
+    infoSecurite.n2          = n2;
+    infoSecurite.K1          = K1;
+    clesVoisins[src]         = K1;
     voisinsAuthentifies[src] = true;
-    voisinsDansStructure[src] = true;
-    infoSecurite.etat = ETAT_CLE_ETABLIE;
+    infoSecurite.etat        = ETAT_CLE_ETABLIE;
     infoSecurite.liensStructure++;
-    
     n0EnAttente.erase(src);
     authentificationsEnCours.erase(src);
-    
-    console << "   AUTHENTIFICATION REUSSIE \n";
-    console << "  Cle K1 partagee etablie (SINGLE_KEY) \n";
-    
+
     module->setColor(GREEN);
-    
-    if (authenticatedModules.find(module->blockId) == authenticatedModules.end()) {
-        authenticatedModules.insert(module->blockId);
-        authenticatedCount++;
-        console << "  Modules authentifies: " << authenticatedCount << "/" << TOTAL_MODULES << "\n";
+
+    // Lancer le prochain module mobile dans la sequence
+    lancerProchainMobile();
+}
+
+void MonApplicationCode::lancerReconfiguration() {
+    reconfigStarted = true;
+    nextMoverIndex  = 0;
+    lancerProchainMobile();
+}
+
+// Lance le prochain module dans l'ordre sequentiel
+void MonApplicationCode::lancerProchainMobile() {
+    if (nextMoverIndex < NB_MOVERS) {
+        Cell3DPosition pos = MOVE_ORDER[nextMoverIndex];
+        nextMoverIndex++;
+        auto world = BaseSimulator::getWorld();
+        for (auto& kv : world->buildingBlocksMap) {
+            if (kv.second->position == pos) {
+                MonApplicationCode* m = (MonApplicationCode*)kv.second->blockCode;
+                console << "\n[Reconf] Lancement M" << m->module->blockId
+                        << " depuis (" << pos[0] << "," << pos[1] << "," << pos[2]
+                        << ") vers (" << m->myTarget[0] << "," << m->myTarget[1]
+                        << "," << m->myTarget[2] << ")\n";
+                m->visited.clear();
+                m->visited.insert(m->module->position);
+                m->moveSteps = 0;
+                m->tryMoveToward(m->myTarget);
+                return;
+            }
+        }
+        // Module introuvable a cette position, passer au suivant
+        lancerProchainMobile();
     } else {
-        console << "  Module deja compte (total: " << authenticatedCount << "/" << TOTAL_MODULES << ")\n";
-    }
-    
-    notifierVoisinsStructurePrete();
-    
-    // Lancer reconfiguration si tous authentifiés
-    if (authenticatedCount >= TOTAL_MODULES && !reconfigStarted) {
-        reconfigStarted = true;
-        console << "\n=== DEBUT RECONFIGURATION ===\n";
-        
-        if (!moveQueue.empty()) {
-            bID nextId = moveQueue.front();
-            auto world = BaseSimulator::getWorld();
-            auto nextBlock = world->getBlockById(nextId);
-            if (nextBlock) {
-                MonApplicationCode *nextCode = (MonApplicationCode*)nextBlock->blockCode;
-                nextCode->visited.clear();
-                nextCode->visited.insert(nextCode->module->position);
-                nextCode->moveSteps = 0;
-                nextCode->tryMoveToward(nextCode->myTarget);
+        // Tous les modules mobiles sont arrives — lancer iM en dernier
+        auto world = BaseSimulator::getWorld();
+        for (auto& kv : world->buildingBlocksMap) {
+            MonApplicationCode* m = (MonApplicationCode*)kv.second->blockCode;
+            if (m->infoSecurite.estModuleInitial && m->module->position != TARGET_IM) {
+                console << "\n[Reconf] Lancement iM M" << m->module->blockId
+                        << " vers (" << TARGET_IM[0] << "," << TARGET_IM[1]
+                        << "," << TARGET_IM[2] << ")\n";
+                m->visited.clear();
+                m->visited.insert(m->module->position);
+                m->moveSteps = 0;
+                m->tryMoveToward(TARGET_IM);
+                return;
             }
         }
     }
 }
 
-// === GESTION STRUCTURE AKC-PM ===
-
-void MonApplicationCode::notifierVoisinsStructurePrete() {
-    console << "Module " << module->blockId << ": Diffusion STRUCTURE_READY\n";
-    
-    for (int i = 0; i < 12; i++) {
-        P2PNetworkInterface* iface = module->getInterface(i);
-        if (iface && iface->connectedInterface) {
-            if (voisinsAuthentifies.find(iface) == voisinsAuthentifies.end()) {
-                MessageStructurePrete* msg = new MessageStructurePrete();
-                sendMessage(msg, iface, DELAI_TRANSMISSION, 0);
-            }
-        }
-    }
+void MonApplicationCode::surReceptionDemandeAuth(shared_ptr<Message> msg,
+                                                  P2PNetworkInterface* src) {
+    auto* m = static_cast<MessageDemandeAuth*>(msg.get());
+    algorithme1_Verifier(src, m->liens, m->n1, m->x, m->K0);
 }
 
-void MonApplicationCode::verifierNouveauxVoisins() {
-    for (int i = 0; i < 12; i++) {
-        P2PNetworkInterface* iface = module->getInterface(i);
-        if (iface && iface->connectedInterface) {
-            if (voisinsDansStructure.find(iface) == voisinsDansStructure.end() &&
-                voisinsAuthentifies.find(iface) == voisinsAuthentifies.end() &&
-                authentificationsEnCours.find(iface) == authentificationsEnCours.end()) {
-                if (estDansStructure()) {
-                    console << "Module " << module->blockId << ": Nouveau voisin detecte\n";
-                    
-                    // Vérifier si le voisin est aussi dans la structure
-                    // Pour simplifier, on utilise toujours STRUCTURE_READY d'abord
-                    MessageStructurePrete* msg = new MessageStructurePrete();
-                    sendMessage(msg, iface, DELAI_TRANSMISSION, 0);
-                }
-            }
-        }
-    }
+void MonApplicationCode::surReceptionDefiCle(shared_ptr<Message> msg,
+                                              P2PNetworkInterface* src) {
+    auto* m = static_cast<MessageDefiCle*>(msg.get());
+    if (n0EnAttente.count(src))
+        algorithme1_Completer(src, m->x1);
 }
 
-// === GESTIONNAIRES DE MESSAGES ===
+void MonApplicationCode::surReceptionAuthEchec(P2PNetworkInterface* src) {
+    bID srcId = src->connectedInterface ? src->connectedInterface->hostBlock->blockId : 0;
+    uint64_t t = getScheduler()->now();
 
-void MonApplicationCode::surReceptionDemandeAuth(shared_ptr<Message> msg, P2PNetworkInterface* src) {
-    MessageDemandeAuth* authMsg = static_cast<MessageDemandeAuth*>(msg.get());
-    console << "Module " << module->blockId << ": Reception AUTH_REQUEST\n";
-    algorithme1_Verifier(src, authMsg->liens, authMsg->n1, authMsg->x, authMsg->K0);
+    authentificationsEnCours.erase(src);
+    n0EnAttente.erase(src);
+    authFailed = true;
+
+    console << "\n[t=" << t << "] *** AUTH_ECHEC recu par M" << module->blockId
+            << " de M" << srcId << " ***\n";
+    console << "  Authentification refusee\n";
+    console << "  M" << module->blockId << " passe en ROUGE\n";
+
+    module->setColor(RED);
 }
-
-void MonApplicationCode::surReceptionDefiCle(shared_ptr<Message> msg, P2PNetworkInterface* src) {
-    MessageDefiCle* cleMsg = static_cast<MessageDefiCle*>(msg.get());
-    console << "Module " << module->blockId << ": Reception KEY_CHALLENGE\n";
-    algorithme1_Completer(src, cleMsg->x1);
-}
-
-void MonApplicationCode::surReceptionStructurePrete(shared_ptr<Message> msg, P2PNetworkInterface* src) {
-    console << "Module " << module->blockId << ": Reception STRUCTURE_READY\n";
-    
-    voisinsDansStructure[src] = true;
-    
-    if (voisinsAuthentifies.find(src) != voisinsAuthentifies.end()) {
-        console << "  -> Deja authentifie avec ce voisin\n";
-        return;
-    }
-    
-    if (authentificationsEnCours.find(src) != authentificationsEnCours.end()) {
-        console << "  -> Authentification deja en cours avec ce voisin\n";
-        return;
-    }
-    
-    // Toujours utiliser Algorithme 1 pour la stabilité
-    // L'Algorithme 2 nécessite des conditions plus strictes
-    if (!estDansStructure()) {
-        console << "  -> Initiation de l'authentification\n";
-        algorithme1_Initier(src);
-    } else {
-        console << "  -> Deja dans la structure, pas d'authentification necessaire\n";
-    }
-}
-
-// === TRAITEMENT DES EVENEMENTS ===
 
 void MonApplicationCode::processLocalEvent(EventPtr pev) {
-    MessagePtr message;
-    
+    Catoms3DBlockCode::processLocalEvent(pev);
+
     switch (pev->eventType) {
         case EVENT_NI_RECEIVE: {
-            message = (static_pointer_cast<NetworkInterfaceReceiveEvent>(pev))->message;
-            P2PNetworkInterface* src = message->destinationInterface;
-            switch (message->type) {
-                case MSG_AUTH_REQUEST:
-                    surReceptionDemandeAuth(message, src);
-                    break;
-                case MSG_KEY_CHALLENGE:
-                    surReceptionDefiCle(message, src);
-                    break;
-                case MSG_STRUCTURE_READY:
-                    surReceptionStructurePrete(message, src);
-                    break;
+            auto msg = static_pointer_cast<NetworkInterfaceReceiveEvent>(pev)->message;
+            P2PNetworkInterface* src = msg->destinationInterface;
+            switch (msg->type) {
+                case MSG_AUTH_REQUEST:  surReceptionDemandeAuth(msg, src); break;
+                case MSG_KEY_CHALLENGE: surReceptionDefiCle(msg, src);     break;
+                case MSG_AUTH_ECHEC:    surReceptionAuthEchec(src);        break;
             }
             break;
         }
-        case EVENT_ADD_NEIGHBOR:
-            verifierNouveauxVoisins();
-            break;
         case EVENT_INTERRUPTION: {
-            unsigned int interruptId = (std::static_pointer_cast<InterruptionEvent<unsigned int>>(pev))->data;
-            
-            if (interruptId == 0) {
-                if (infoSecurite.estModuleInitial) {
-                    notifierVoisinsStructurePrete();
-                }
-            } else if (interruptId == 2) {
-                if (isMoving) {
-                    if (module->position != lastPosition) {
-                        isMoving = false;
-                        
-                        if (module->position == myTarget) {
-                            if (!moveQueue.empty()) moveQueue.pop();
-                            
-                            if (!moveQueue.empty()) {
-                                bID nextId = moveQueue.front();
-                                auto nextBlock = BaseSimulator::getWorld()->getBlockById(nextId);
-                                if (nextBlock) {
-                                    MonApplicationCode *nextCode = (MonApplicationCode*)nextBlock->blockCode;
-                                    nextCode->visited.clear();
-                                    nextCode->visited.insert(nextCode->module->position);
-                                    nextCode->moveSteps = 0;
-                                    nextCode->tryMoveToward(nextCode->myTarget);
-                                }
-                            }
-                        } else {
-                            tryMoveToward(myTarget);
-                        }
-                    } else {
-                        getScheduler()->schedule(
-                            new InterruptionEvent<unsigned int>(getScheduler()->now() + 10000, module, 2));
-                    }
-                }
-            }
+            auto id = static_pointer_cast<InterruptionEvent<unsigned int>>(pev)->data;
+            if (id == 0 && infoSecurite.estModuleInitial)
+                lancerReconfiguration();
             break;
         }
-        default:
-            break;
+        default: break;
     }
 }
 
-// === RECONFIGURATION ===
-
-bool MonApplicationCode::tryMoveToward(const Cell3DPosition &goal) {
+bool MonApplicationCode::tryMoveToward(const Cell3DPosition& goal) {
     if (module->position == goal) return false;
+    if (moveSteps >= MAX_STEPS) {
+        console << "[WARN] M" << module->blockId << " MAX_STEPS atteint\n";
+        return false;
+    }
 
     auto tab = Catoms3DMotionEngine::getAllRotationsForModule(module);
-    Cell3DPosition fp;
-    short fo;
+    Cell3DPosition fp; short fo;
 
-    struct Candidate { Cell3DPosition pos; double dist; bool visited; };
-    vector<Candidate> candidates;
+    struct Candidate { Cell3DPosition pos; double dist; bool vis; };
+    vector<Candidate> cands;
 
-    for (auto &elem : tab) {
-        elem.second.init(((Catoms3DGlBlock *)module->ptrGlBlock)->mat);
+    for (auto& elem : tab) {
+        elem.second.init(((Catoms3DGlBlock*)module->ptrGlBlock)->mat);
         elem.second.getFinalPositionAndOrientation(fp, fo);
-
         if (!lattice->isFree(fp)) continue;
-
-        int nbOccupied = 0;
-        for (auto &nPos : lattice->getNeighborhood(fp))
-            if (lattice->cellHasBlock(nPos) && nPos != module->position) nbOccupied++;
-        if (nbOccupied < 1) continue;
-
-        double dist = (fp[0]-goal[0])*(fp[0]-goal[0])
-                    + (fp[1]-goal[1])*(fp[1]-goal[1])
-                    + (fp[2]-goal[2])*(fp[2]-goal[2]);
-
-        candidates.push_back({fp, dist, visited.count(fp) > 0});
+        int nbVoisins = 0;
+        for (auto& np : lattice->getNeighborhood(fp))
+            if (lattice->cellHasBlock(np) && np != module->position) nbVoisins++;
+        if (nbVoisins < 1) continue;
+        double d = (double)((fp[0]-goal[0])*(fp[0]-goal[0])
+                          + (fp[1]-goal[1])*(fp[1]-goal[1])
+                          + (fp[2]-goal[2])*(fp[2]-goal[2]));
+        cands.push_back({fp, d, visited.count(fp) > 0});
     }
+    if (cands.empty()) return false;
 
-    if (candidates.empty()) return false;
-
-    Cell3DPosition bestPos;
-    double bestDist = 999999;
-    bool found = false;
-
-    for (auto &c : candidates) {
-        if (!c.visited && c.dist < bestDist) {
-            bestDist = c.dist;
-            bestPos = c.pos;
-            found = true;
-        }
-    }
+    Cell3DPosition best; double bestDist = 1e9; bool found = false;
+    for (auto& c : cands)
+        if (!c.vis && c.dist < bestDist) { bestDist = c.dist; best = c.pos; found = true; }
 
     if (!found) {
         visited.clear();
         visited.insert(module->position);
-        for (auto &c : candidates) {
-            if (c.dist < bestDist) {
-                bestDist = c.dist;
-                bestPos = c.pos;
-                found = true;
-            }
-        }
+        bestDist = 1e9;
+        for (auto& c : cands)
+            if (c.dist < bestDist) { bestDist = c.dist; best = c.pos; found = true; }
     }
 
     if (found) {
-        visited.insert(bestPos);
+        visited.insert(best);
         moveSteps++;
-        isMoving = true;
-        lastPosition = module->position;
-        
-        Catoms3DBlock* catom = (Catoms3DBlock*)module;
-        catom->moveTo(bestPos);
-        
-        getScheduler()->schedule(
-            new InterruptionEvent<unsigned int>(getScheduler()->now() + 50000, module, 2));
-        
-        return true;
+        bool moved = ((Catoms3DBlock*)module)->moveTo(best);
+        if (!moved) moveSteps--;
+        return moved;
     }
     return false;
 }
 
-void MonApplicationCode::onMotionEnd() {}
+void MonApplicationCode::onMotionEnd() {
+    if (module->position == myTarget) {
+        // Purger les interfaces deconnectees apres le mouvement
+        for (auto it = voisinsAuthentifies.begin(); it != voisinsAuthentifies.end(); )
+            if (!it->first->connectedInterface) it = voisinsAuthentifies.erase(it); else ++it;
+        for (auto it = clesVoisins.begin(); it != clesVoisins.end(); )
+            if (!it->first->connectedInterface) it = clesVoisins.erase(it); else ++it;
+        authentificationsEnCours.clear();
+        n0EnAttente.clear();
 
-void MonApplicationCode::parseUserBlockElements(TiXmlElement *config) {}
+        if (isReturning) {
+            console << "[Reconf] M" << module->blockId
+                    << " retourne a sa position initiale (ROUGE)\n";
+            module->setColor(RED);
+            return;
+        }
 
-// === CLASSES DE MESSAGES ===
+        console << "[Reconf] M" << module->blockId << " arrive a ("
+                << myTarget[0] << "," << myTarget[1] << "," << myTarget[2] << ")\n";
 
-MessageDemandeAuth::MessageDemandeAuth(int _liens, uint64_t _n1, uint64_t _x,
+        // Chercher un voisin authentifie pour declencer l'Algo1
+        for (int i = 0; i < 12; i++) {
+            P2PNetworkInterface* iface = module->getInterface(i);
+            if (!ifaceValide(iface, module)) continue;
+            MonApplicationCode* vc =
+                (MonApplicationCode*)iface->connectedInterface->hostBlock->blockCode;
+            if (vc->estDansStructure()) {
+                algorithme1_Initier(iface);
+                return;
+            }
+        }
+        console << "[WARN] M" << module->blockId << " : aucun voisin authentifie trouve\n";
+    } else {
+        if (!tryMoveToward(myTarget)) {
+            visited.clear();
+            visited.insert(module->position);
+            moveSteps = 0;
+            tryMoveToward(myTarget);
+        }
+    }
+}
+
+void MonApplicationCode::parseUserBlockElements(TiXmlElement* /*config*/) {}
+
+MessageDemandeAuth::MessageDemandeAuth(int _liens,
+                                       const vector<uint8_t>& _n1,
+                                       const vector<uint8_t>& _x,
                                        const vector<uint8_t>& _K0)
-    : Message(), liens(_liens), n1(_n1), x(_x), K0(_K0) {
-    type = MSG_AUTH_REQUEST;
-}
-MessageDemandeAuth::~MessageDemandeAuth() {}
+    : Message(), liens(_liens), n1(_n1), x(_x), K0(_K0) { type = MSG_AUTH_REQUEST; }
 
-MessageDefiCle::MessageDefiCle(uint64_t _x1) : Message(), x1(_x1) {
-    type = MSG_KEY_CHALLENGE;
-}
-MessageDefiCle::~MessageDefiCle() {}
+MessageDefiCle::MessageDefiCle(const vector<uint8_t>& _x1)
+    : Message(), x1(_x1) { type = MSG_KEY_CHALLENGE; }
 
-MessageStructurePrete::MessageStructurePrete() : Message() {
-    type = MSG_STRUCTURE_READY;
-}
-MessageStructurePrete::~MessageStructurePrete() {}
-
+MessageAuthEchec::MessageAuthEchec()
+    : Message() { type = MSG_AUTH_ECHEC; }

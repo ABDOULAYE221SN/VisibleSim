@@ -1,6 +1,6 @@
-SRCS = MonApplication.cpp MonApplicationCode.cpp
+SRCS = MonApplicationTest.cpp MonApplicationTestCode.cpp
 SPONGENT_OBJ = ../../simulatorCore/src/spongent160.o
-OUT = ../../applicationsBin/MonApplication/MonApplication
+OUT = ../../applicationsBin/MonApplicationTest/MonApplicationTest
 MODULELIB = -lsimCatoms3D
 
 OBJS = $(SRCS:.cpp=.o)
@@ -14,7 +14,6 @@ INCLUDES = -I. -I../../simulatorCore/src
 ifeq ($(OS),Darwin)
 LIBS = -L../../simulatorCore/lib $(MODULELIB) -lGLEW -lmuparser -framework GLUT -framework OpenGL
 else
-# Order matters: simulator lib first, then GLEW, then GLUT, then GLU, then GL
 LIBS = -L../../simulatorCore/lib $(MODULELIB) -lGLEW -lglut -lGLU -lGL -lmuparser -lpthread -lm
 endif
 

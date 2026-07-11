@@ -1,5 +1,5 @@
-#ifndef MonApplicationCode_H_
-#define MonApplicationCode_H_
+#ifndef MonApplicationTestCode_H_
+#define MonApplicationTestCode_H_
 
 #include "robots/catoms3D/catoms3DSimulator.h"
 #include "robots/catoms3D/catoms3DWorld.h"
@@ -64,15 +64,17 @@ public:
     ~MessageAuthEchec() {}
 };
 
-class MonApplicationCode : public Catoms3DBlockCode {
+class MonApplicationTestCode : public Catoms3DBlockCode {
 private:
     Catoms3DBlock *module = nullptr;
 
     Cell3DPosition myTarget;
+    Cell3DPosition myHome;       // position initiale — utilisee par le module falsifie pour rentrer
     std::set<Cell3DPosition> visited;
     int  moveSteps   = 0;
     bool isReturning = false;
     bool authFailed  = false;
+    bool isFalsified = false;    // true uniquement pour le module en (3,3,2)
 
     InfoSecurite infoSecurite;
     std::map<P2PNetworkInterface*, std::vector<uint8_t>> clesVoisins;
@@ -81,8 +83,8 @@ private:
     std::map<P2PNetworkInterface*, std::vector<uint8_t>> n0EnAttente;
 
 public:
-    MonApplicationCode(Catoms3DBlock *host);
-    ~MonApplicationCode();
+    MonApplicationTestCode(Catoms3DBlock *host);
+    ~MonApplicationTestCode();
 
     void startup() override;
     void onMotionEnd() override;
@@ -105,6 +107,7 @@ public:
     void afficherStatsGlobal() const;
 
     void algorithme1_Initier(P2PNetworkInterface* dest);
+    void algorithme1_InitierFalsifie(P2PNetworkInterface* dest);
     void algorithme1_Verifier(P2PNetworkInterface* src, int liens,
                               const std::vector<uint8_t>& n1,
                               const std::vector<uint8_t>& x,
@@ -120,7 +123,7 @@ public:
     void surReceptionAuthEchec(P2PNetworkInterface* src);
 
     static BlockCode *buildNewBlockCode(BuildingBlock *host) {
-        return new MonApplicationCode((Catoms3DBlock*)host);
+        return new MonApplicationTestCode((Catoms3DBlock*)host);
     }
 };
 

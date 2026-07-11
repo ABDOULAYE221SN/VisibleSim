@@ -1,0 +1,226 @@
+================================================================
+  PRÉSENTATION DE L'APPLICATION : MonApplication
+  Implémentation du protocole AKC-PM sur VisibleSim (Catoms3D)
+  Référence : Faye, Makhoul, Diene, Ouzzif — INISTA 2025
+================================================================
+
+
+----------------------------------------------------------------
+1. CONTEXTE ET PROBLÉMATIQUE
+----------------------------------------------------------------
+
+La matière programmable est composée de milliers de modules
+robotiques millimétriques identiques (Catoms3D). Chaque module
+peut calculer, communiquer avec ses voisins directs et se
+déplacer par rotation autour de ses voisins.
+
+Défi sécurité (Section V de l'article) :
+  - Les modules sont anonymes : pas d'identifiant unique
+  - Pas de tiers de confiance, pas de secret partagé a priori
+  - Ressources très limitées (ATtiny45 @ 8 MHz)
+  - Environnement totalement distribué
+
+C'est le problème que résout le protocole AKC-PM :
+Authentication, Key Management and Confidentiality for
+Programmable Matter.
+
+
+----------------------------------------------------------------
+2. PRIMITIVES CRYPTOGRAPHIQUES (Section VI de l'article)
+----------------------------------------------------------------
+
+  Notation  Description                          Taille
+  --------  -----------                          ------
+  H(x)      SPONGENT-160 (hash léger, CHES 2011) 160 bits
+  L(i)      Ligne i du code source               256 bits
+  HL(n)     H(L(n mod Nb))                       160 bits
+  XOR (⊕)   OU exclusif bit à bit                160 bits
+  Ts        ⌊ts / 10⌋  (horloge arrondie)        64 bits
+
+Paramètres utilisés dans la simulation :
+  - Nb = 128 lignes de code source
+  - Tolérance de synchronisation : ±5 unités (±50 µs)
+  - Délai de transmission simulé : Δt = 100 µs
+  - Processeur de référence : ATtiny45 @ 8 MHz
+
+
+----------------------------------------------------------------
+3. SCÉNARIO SIMULÉ
+----------------------------------------------------------------
+
+Disposition initiale : 3 modules en ligne sur l'axe X
+
+    M1(1,2,2) — M2(2,2,2) — M3(3,2,2)
+
+  M3 = module initial (iM) → désigné par sa position géographique
+       conformément à la Section IV-A de l'article.
+
+Le scénario se déroule en deux phases séquentielles.
+
+
+----------------------------------------------------------------
+4. PHASE 1 — AUTHENTIFICATION RÉUSSIE : M1 → iM
+   (Algorithme 1 de l'article, Section VI-A)
+----------------------------------------------------------------
+
+iM lance le déplacement de M1 vers la position (4,2,2),
+juste après iM dans la ligne.
+
+Une fois arrivé, M1 exécute l'Algorithme 1 :
+
+  SF-1 (M1 génère les preuves) :
+    n0  = genererNonce160()          secret, jamais transmis
+    n1  = H(n0)                      empreinte d'authentification
+    K0  = H(L(n0 mod Nb))            preuve d'exécution du même code
+    Ts  = ⌊ts / 10⌋
+    x   = Ts ⊕ n0                    n0 masqué par l'horloge
+
+  SF-2 (M1 → iM) :
+    Envoi : AUTH_REQUEST(liens=0, n1, x, K0)
+
+  SF-3 (iM vérifie) :
+    Ts' = ⌊(Tr - Δt) / 10⌋
+    Pour offset ∈ [-5 .. +5] :
+      n0' = x ⊕ (Ts' + offset)
+      Si H(n0') == n1 → synchronisation OK
+    Si H(L(n0' mod Nb)) == K0 → même code confirmé
+    Génère n2 (SINGLE_KEY : n2 constant pour toute la structure)
+    x1  = n2 ⊕ n0'
+    K1  = H(L(n2 mod Nb))
+
+  SF-4 (iM → M1) :
+    Envoi : KEY_CHALLENGE(x1)
+
+  SF-5 (M1 complète) :
+    n2  = x1 ⊕ n0
+    K1  = H(L(n2 mod Nb))
+    → Clé K1 partagée établie entre M1 et iM
+
+Résultat : M1 devient VERT ✓
+           M1 est maintenant membre authentifié de la structure.
+
+Note SINGLE_KEY (Fig. 3 de l'article) :
+  iM conserve n2 constant. Tous les modules authentifiés
+  partagent la même clé K1 = HL(n2 mod Nb).
+
+
+----------------------------------------------------------------
+5. PHASE 2 — AUTHENTIFICATION ÉCHOUÉE : M2 → M1
+   (Algorithme 1 falsifié + Section VI-B de l'article)
+----------------------------------------------------------------
+
+Après le succès de M1, iM lance le déplacement de M2
+vers la position (5,2,2).
+
+Principe important (Section VI-B de l'article) :
+  Tout module authentifié peut jouer le rôle de vérificateur,
+  pas seulement iM. M2 trouve M1 (son voisin direct, VERT)
+  et lui envoie sa demande.
+
+M2 exécute une version falsifiée de l'Algorithme 1 :
+
+  SF-1 (M2 génère des preuves invalides) :
+    n0  = genererNonce160()
+    n1  = H(n0)                      correct
+    K0  = nonce_aleatoire()          !! K0 FAUX !! ≠ HL(n0 mod Nb)
+    x   = Ts ⊕ n0
+
+  SF-2 (M2 → M1) :
+    Envoi : AUTH_REQUEST(liens=0, n1, x, K0_faux)
+
+  SF-3 (M1 vérifie) :
+    Ts' calculé → n0' récupéré → H(n0') == n1 : sync OK
+    Mais H(L(n0' mod Nb)) ≠ K0_faux → ÉCHEC
+    → M1 envoie AUTH_ECHEC à M2
+
+  Réception AUTH_ECHEC (M2) :
+    M2 reçoit le refus de M1
+    M2 devient ROUGE ✗
+    M2 retourne à sa position initiale (2,2,2)
+
+Résultat : M2 reste ROUGE — authentification refusée.
+
+Interprétation sécurité (Section VII-A de l'article) :
+  K0 = HL(n0 mod Nb) prouve que le module exécute le même
+  code source. Un module avec un K0 falsifié ne peut pas
+  prouver cette appartenance → rejet systématique.
+
+
+----------------------------------------------------------------
+6. PROPRIÉTÉS DE SÉCURITÉ VÉRIFIÉES
+   (Section VII de l'article)
+----------------------------------------------------------------
+
+  ✓ Protection contre les attaques par rejeu :
+    x = Ts ⊕ n0 lie le message à l'horloge courante.
+    Un message rejoué sera désynchronisé → rejeté.
+
+  ✓ Preuve d'appartenance au code :
+    K0 = HL(n0 mod Nb) garantit que le module exécute
+    le même code source que la structure.
+
+  ✓ Authentification mutuelle :
+    En SF-5, M1 vérifie implicitement iM en recalculant K1.
+
+  ✓ Authentification distribuée :
+    Tout module authentifié peut vérifier une demande
+    (pas de dépendance à un tiers de confiance central).
+
+  ✓ Détection d'imposteur :
+    Un module avec K0 falsifié est rejeté (cas M2).
+
+
+----------------------------------------------------------------
+7. CODES COULEUR VISUELS
+----------------------------------------------------------------
+
+  BLEU    Module initial iM (M3) — désigné au démarrage
+  GRIS    Module en attente (non authentifié)
+          → attend d'être lancé par iM
+  ORANGE  Authentification en cours (SF-1/SF-2 envoyés)
+  VERT    Authentifié avec succès — clé K1 établie
+  ROUGE   Authentification refusée — retour à la position initiale
+
+
+----------------------------------------------------------------
+8. COMPLEXITÉ (Table II de l'article)
+----------------------------------------------------------------
+
+  Algorithme 1 (m modules) :
+    C1 = m × (6TH + 2Tx + 4XOR)
+
+  Complexité temporelle : O(1) par lien
+  Complexité spatiale   : O(1) par module
+  Nombre de transmissions : 2 (SF-2 et SF-4)
+
+  Comparaison avec PROLISEAN (Table II) :
+    AKC-PM offre une meilleure sécurité que toutes les
+    versions de PROLISEAN (protection replay, preuve de code),
+    avec un surcoût légèrement supérieur aux versions V1/V2
+    mais inférieur aux versions V3/V4 (fonction chaotique O(n)).
+
+
+----------------------------------------------------------------
+9. FICHIERS DU PROJET
+----------------------------------------------------------------
+
+  applicationsSrc/MonApplication/
+    MonApplication.cpp        Point d'entrée du simulateur
+    MonApplicationCode.hpp    Déclarations (messages, états, classe)
+    MonApplicationCode.cpp    Implémentation du protocole AKC-PM
+
+  applicationsBin/MonApplication/
+    config.xml                3 modules en ligne : M1, M2, M3(iM)
+    MonApplication            Binaire compilé
+
+
+----------------------------------------------------------------
+10. RÉFÉRENCE
+----------------------------------------------------------------
+
+  Y. Faye, A. Makhoul, S. M. Diene, M. Ouzzif,
+  "A Lightweight Distributed Security Protocol with Adaptive
+  Key Management for Programmable Matter Based on Modular
+  Robots", INISTA 2025.
+
+================================================================

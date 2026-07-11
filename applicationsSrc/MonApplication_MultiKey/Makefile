@@ -1,6 +1,6 @@
-SRCS = MonApplication.cpp MonApplicationCode.cpp
+SRCS = MonApplication_MultiKey.cpp MonApplication_MultiKeyCode.cpp
 SPONGENT_OBJ = ../../simulatorCore/src/spongent160.o
-OUT = ../../applicationsBin/MonApplication/MonApplication
+OUT = ../../applicationsBin/MonApplication_MultiKey/MonApplication_MultiKey
 MODULELIB = -lsimCatoms3D
 
 OBJS = $(SRCS:.cpp=.o)

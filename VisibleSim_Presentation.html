@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VisibleSim - Présentation</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            overflow: hidden;
+        }
+        
+        .slide-container {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .slide {
+            background: white;
+            width: 90%;
+            max-width: 1200px;
+            height: 85vh;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 60px;
+            display: none;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+        
+        .slide.active {
+            display: flex;
+            animation: slideIn 0.5s ease-out;
+        }
+        
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(50px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+        
+        h1 {
+            color: #667eea;
+            font-size: 3em;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        h2 {
+            color: #764ba2;
+            font-size: 2.5em;
+            margin-bottom: 30px;
+            border-bottom: 3px solid #667eea;
+            padding-bottom: 10px;
+        }
+        
+        h3 {
+            color: #667eea;
+            font-size: 1.8em;
+            margin: 20px 0 10px 0;
+        }
+        
+        p, li {
+            font-size: 1.2em;
+            line-height: 1.8;
+            color: #333;
+            margin-bottom: 15px;
+        }
+        
+        ul, ol {
+            margin-left: 40px;
+        }
+        
+        li {
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            text-align: center;
+            font-size: 1.5em;
+            color: #666;
+            margin-bottom: 40px;
+        }
+        
+        code {
+            background: #f4f4f4;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            color: #e83e8c;
+            font-size: 0.9em;
+        }
+        
+        pre {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 20px;
+            border-radius: 10px;
+            overflow-x: auto;
+            margin: 20px 0;
+            font-size: 0.85em;
+            line-height: 1.5;
+        }
+        
+        pre code {
+            background: none;
+            color: inherit;
+            padding: 0;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            font-size: 1em;
+        }
+        
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        th {
+            background: #667eea;
+            color: white;
+            font-weight: bold;
+        }
+        
+        tr:hover {
+            background: #f5f5f5;
+        }
+        
+        .controls {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 20px;
+            z-index: 1000;
+        }
+        
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 50px;
+            font-size: 1.1em;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+        
+        button:hover {
+            background: #764ba2;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+        }
+        
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .slide-number {
+            position: fixed;
+            top: 20px;
+            right: 30px;
+            background: rgba(255,255,255,0.9);
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-weight: bold;
+            color: #667eea;
+        }
+        
+        .highlight {
+            background: #fff3cd;
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+        
+        .emoji {
+            font-size: 1.5em;
+        }
+        
+        .box {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            border-left: 4px solid #667eea;
+            margin: 15px 0;
+        }
+        
+        .center {
+            text-align: center;
+        }
+        
+        .logo {
+            font-size: 4em;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="slide-number">
+        <span id="current-slide">1</span> / <span id="total-slides">0</span>
+    </div>
+    
+    <div class="slide-container">
+        <!-- Slide 1 -->
+        <div class="slide active">
+            <div class="center">
+                <div class="logo">🤖</div>
+                <h1>VisibleSim</h1>
+                <p class="subtitle">Simulateur de Robots Modulaires Auto-Reconfigurables</p>
+                <p style="font-size: 1.3em; margin-top: 40px;">Un outil de simulation pour la recherche en robotique modulaire</p>
+            </div>
+        </div>
+        
+        <!-- Slide 2 -->
+        <div class="slide">
+            <h2>Qu'est-ce que VisibleSim ?</h2>
+            <ul>
+                <li><strong>Simulateur open-source</strong> développé en C++17</li>
+                <li> Simule des <strong>systèmes de robots modulaires</strong> auto-reconfigurables</li>
+                <li> Supporte <strong>6 familles de robots</strong> différentes</li>
+                <li> Environnement pour <strong>algorithmes distribués</strong></li>
+                <li> Visualisation 3D avec <strong>OpenGL/GLUT</strong></li>
+                <li> Support <strong>C++</strong> et <strong>Meld</strong> (langage déclaratif)</li>
+            </ul>
+        </div>
+
+        
+        <!-- Slide 3 -->
+        <div class="slide">
+            <h2>Types de Robots Supportés</h2>
+            <table>
+                <tr><th>Robot</th><th>Description</th><th>Caractéristiques</th></tr>
+                <tr><td><strong>BlinkyBlocks</strong></td><td>Cubes avec LEDs</td><td>Grille cubique, 6 faces</td></tr>
+                <tr><td><strong>Catoms3D</strong></td><td>Modules sphériques</td><td>Rotation 3D autour pivot</td></tr>
+                <tr><td><strong>Catoms2D</strong></td><td>Modules planaires</td><td>Rotation 2D (60°)</td></tr>
+                <tr><td><strong>SmartBlocks</strong></td><td>Blocs intelligents</td><td>Grille cubique avancée</td></tr>
+                <tr><td><strong>Datoms</strong></td><td>Modules déformables</td><td>Géométrie variable</td></tr>
+                <tr><td><strong>Hexanodes</strong></td><td>Modules hexagonaux</td><td>Grille hexagonale</td></tr>
+            </table>
+        </div>
+        
+        <!-- Slide 4 -->
+        <div class="slide">
+            <h2>Architecture du Simulateur</h2>
+            <pre><code>VisibleSim/
+├── simulatorCore/     # Cœur du simulateur
+│   ├── base/          # Classes fondamentales
+│   ├── robots/        # Implémentations spécifiques
+│   ├── events/        # Système d'événements
+│   ├── comm/          # Communication P2P
+│   ├── gui/           # Interface graphique
+│   └── motion/        # Gestion des mouvements
+├── applicationsSrc/   # Code utilisateur
+└── applicationsBin/   # Exécutables et configs</code></pre>
+        </div>
+
+        
+        <!-- Slide 5 -->
+        <div class="slide">
+            <h2>Classes Principales</h2>
+            <div class="box">
+                <h3>Simulator</h3>
+                <p>Point d'entrée, parse XML, initialise composants</p>
+            </div>
+            <div class="box">
+                <h3>World</h3>
+                <p>Gère modules, grille spatiale, rendu graphique</p>
+            </div>
+            <div class="box">
+                <h3>BuildingBlock</h3>
+                <p>Module physique avec interfaces P2P</p>
+            </div>
+            <div class="box">
+                <h3>BlockCode</h3>
+                <p>Programme distribué exécuté par chaque module</p>
+            </div>
+        </div>
+        
+        <!-- Slide 6 -->
+        <div class="slide">
+            <h2>Système d'Événements</h2>
+            <ul>
+                <li>Architecture <strong>événementielle</strong> avec ordonnanceur</li>
+                <li><strong>Types d'événements :</strong>
+                    <ul>
+                        <li>Messages entre modules</li>
+                        <li>Mouvements (rotation, translation)</li>
+                        <li>Ajout/suppression de voisins</li>
+                        <li>Interactions utilisateur (tap)</li>
+                    </ul>
+                </li>
+                <li>Temps simulé avec <strong>horloges locales</strong> par module</li>
+                <li>Support du bruit et de la variabilité</li>
+            </ul>
+        </div>
+
+        
+        <!-- Slide 7 -->
+        <div class="slide">
+            <h2>Exemple : Fichier Principal</h2>
+            <pre><code>#include "robots/blinkyBlocks/blinkyBlocksSimulator.h"
+#include "monAppCode.h"
+
+using namespace BlinkyBlocks;
+
+int main(int argc, char **argv) {
+    // Créer le simulateur
+    createSimulator(argc, argv, 
+                    MonAppCode::buildNewBlockCode);
+    
+    // Nettoyer
+    deleteSimulator();
+    return 0;
+}</code></pre>
+        </div>
+        
+        <!-- Slide 8 -->
+        <div class="slide">
+            <h2>Exemple : BlockCode</h2>
+            <pre><code>class MonAppCode : public BlinkyBlocksBlockCode {
+    int distance;
+public:
+    MonAppCode(BlinkyBlocksBlock *host) 
+        : BlinkyBlocksBlockCode(host) {}
+    
+    void startup() override {
+        // Enregistrer handler
+        addMessageEventFunc2(BROADCAST_MSG,
+            std::bind(&MonAppCode::handler, this, _1, _2));
+        
+        if (getId() == 1) {
+            distance = 0;
+            setColor(RED);
+            sendMessageToAllNeighbors(msg, 100, 200, 0);
+        }
+    }
+};</code></pre>
+        </div>
+
+        
+        <!-- Slide 9 -->
+        <div class="slide">
+            <h2>API de Communication</h2>
+            <pre><code>// Envoi à tous les voisins
+sendMessageToAllNeighbors(msg, t0, dt, nexcept, ...);
+
+// Envoi à un voisin spécifique
+sendMessage(msg, interface, t0, dt);
+
+// Enregistrer un handler
+addMessageEventFunc2(MSG_TYPE, 
+    std::bind(&MyCode::handler, this, _1, _2));
+
+void handler(MessagePtr msg, P2PNetworkInterface *sender) {
+    // Traiter le message
+}</code></pre>
+        </div>
+        
+        <!-- Slide 10 -->
+        <div class="slide">
+            <h2>API de Manipulation</h2>
+            <pre><code>// Couleur
+setColor(RED);
+setColor(255, 128, 0);
+
+// Information
+bID id = getId();
+vector&lt;BuildingBlock*&gt; neighbors = getNeighbors();
+uint8_t nbNeighbors = getNbNeighbors();
+
+// Mouvement
+moveTo(Cell3DPosition(x, y, z));
+bool canMove = canMoveTo(dest);</code></pre>
+        </div>
+
+        
+        <!-- Slide 11 -->
+        <div class="slide">
+            <h2>Configuration XML - Base</h2>
+            <pre><code>&lt;?xml version="1.0"?&gt;
+&lt;world gridSize="20,20,20" windowSize="1024,800"&gt;
+  &lt;camera target="100,100,100" 
+          directionSpherical="0,70,400" angle="45"/&gt;
+  
+  &lt;blockList color="255,255,0" ids="ORDERED"&gt;
+    &lt;block position="5,5,5"/&gt;
+    &lt;block position="5,5,6" color="255,0,0"/&gt;
+    &lt;blocksLine plane="XY" line="5" values="0011100"/&gt;
+  &lt;/blockList&gt;
+&lt;/world&gt;</code></pre>
+        </div>
+        
+        <!-- Slide 12 -->
+        <div class="slide">
+            <h2>Configuration XML - IDs</h2>
+            <pre><code>&lt;!-- ORDERED : IDs séquentiels (1, 2, 3, ...) --&gt;
+&lt;blockList ids="ORDERED"&gt;
+  &lt;block position="5,5,5"/&gt;  &lt;!-- ID=1 --&gt;
+&lt;/blockList&gt;
+
+&lt;!-- MANUAL : IDs manuels --&gt;
+&lt;blockList ids="MANUAL"&gt;
+  &lt;block position="5,5,5" id="42"/&gt;
+&lt;/blockList&gt;
+
+&lt;!-- RANDOM : IDs aléatoires --&gt;
+&lt;blockList ids="RANDOM" seed="123" step="10"&gt;
+  &lt;block position="5,5,5"/&gt;
+&lt;/blockList&gt;</code></pre>
+        </div>
+
+        
+        <!-- Slide 13 -->
+        <div class="slide">
+            <h2>Configuration XML - Targets</h2>
+            <pre><code>&lt;targetList&gt;
+  &lt;target format="grid"&gt;
+    &lt;cell position="5,5,5" color="255,0,0"/&gt;
+    &lt;cell position="5,5,6" color="0,255,0"/&gt;
+  &lt;/target&gt;
+&lt;/targetList&gt;</code></pre>
+            <h3>API Target :</h3>
+            <pre><code>// Charger le prochain target
+BlockCode::loadNextTarget();
+
+// Vérifier si position dans target
+bool inTarget = target->isInTarget(pos);
+
+// Obtenir couleur cible
+Color c = target->getTargetColor(pos);</code></pre>
+        </div>
+        
+        <!-- Slide 14 -->
+        <div class="slide">
+            <h2>Options de Ligne de Commande</h2>
+            <pre><code># Modes d'exécution
+./monApp -c config.xml -R    # Fastest
+./monApp -c config.xml -r    # Realtime
+./monApp -c config.xml -t    # Terminal (sans GUI)
+
+# Contrôle durée
+./monApp -c config.xml -s 10000  # Arrêt à 10s
+./monApp -c config.xml -s inf    # Infini
+
+# Options sortie
+./monApp -c config.xml -x    # Fermeture auto
+./monApp -c config.xml -g    # Export config
+./monApp -c config.xml -l    # Log fichier
+./monApp -c config.xml -i    # Stats détaillées
+
+# Meld
+./meld -c config.xml -p prog.bb -k BB</code></pre>
+        </div>
+
+        
+        <!-- Slide 15 -->
+        <div class="slide">
+            <h2>Support Meld</h2>
+            <p><strong>Langage déclaratif</strong> pour algorithmes distribués</p>
+            <h3>Workflow :</h3>
+            <ol>
+                <li>Écrire <code>.meld</code> dans <code>applicationsBin/meld/programs/</code></li>
+                <li>Compiler : <code>./compile-meld.sh programs/prog.meld</code></li>
+                <li>Exécuter : <code>./meld -c config.xml -p outprogs/prog.bb -k BB</code></li>
+            </ol>
+            <h3>Prédicats :</h3>
+            <pre><code>!setColor(Node, R, G, B, I).
+!moveTo(Node, X, Y, Z).
+!at(Node, X, Y, Z).
+!neighbor(NodeA, NodeB, Face).
+!neighborCount(Node, Count).</code></pre>
+        </div>
+        
+        <!-- Slide 16 -->
+        <div class="slide">
+            <h2>Système d'Horloges</h2>
+            <p>Chaque module possède une <strong>horloge interne indépendante</strong></p>
+            <h3>Modèles disponibles :</h3>
+            <ul>
+                <li><strong>PerfectClock</strong> : Horloge parfaite (défaut)</li>
+                <li><strong>GNoiseQClock</strong> : Modèle quadratique avec bruit gaussien</li>
+                <li><strong>DNoiseQClock</strong> : Bruit basé sur données réelles</li>
+            </ul>
+            <pre><code>// Convertir temps simulateur → local
+Time localTime = clock->getTime(simTime);
+
+// Convertir temps local → simulateur  
+Time simTime = clock->getSimulationTime(localTime);</code></pre>
+        </div>
+
+        
+        <!-- Slide 17 -->
+        <div class="slide">
+            <h2>Interactions Utilisateur</h2>
+            <h3>Contrôles de base :</h3>
+            <ul>
+                <li><code>Ctrl + Clic gauche</code> : Sélectionner module</li>
+                <li><code>Ctrl + Clic droit</code> : Menu contextuel</li>
+                <li><code>r</code> / <code>R</code> : Démarrer (realtime/fastest)</li>
+                <li><code>Espace</code> : Pause/Reprendre</li>
+                <li><code>s</code> / <code>S</code> : Screenshot / Vidéo</li>
+                <li><code>q</code> / <code>Esc</code> : Quitter</li>
+            </ul>
+            <h3>Menu contextuel :</h3>
+            <ul>
+                <li>Add/Delete block</li>
+                <li>Tap (événement debug)</li>
+                <li>Save (export XML)</li>
+                <li>CW/CCW Rotation (Catoms2D)</li>
+            </ul>
+        </div>
+        
+        <!-- Slide 18 -->
+        <div class="slide">
+            <h2>Tests de Régression</h2>
+            <pre><code># Script de test
+./utilities/blockCodeTest.sh testID ./app -c config.xml
+
+# Dans Makefile
+TESTS = ../../utilities/blockCodeTest.sh test1 $(OUT) -c c1.xml ;\
+        ../../utilities/blockCodeTest.sh test2 $(OUT) -c c2.xml
+
+# Exécuter
+make test</code></pre>
+            <h3>Processus :</h3>
+            <ol>
+                <li>Exécuter avec <code>-g</code> pour générer <code>.confCheck.xml</code></li>
+                <li>Renommer en <code>.controlConf_testID.xml</code></li>
+                <li>Tests futurs comparent avec référence</li>
+                <li>Résultat : <strong>[PASS]</strong> ou <strong>[FAILED]</strong></li>
+            </ol>
+        </div>
+
+        
+        <!-- Slide 19 -->
+        <div class="slide">
+            <h2>Exemples d'Applications</h2>
+            <h3>Algorithmes de base :</h3>
+            <ul>
+                <li><strong>simpleColorBB</strong> : Propagation de distance</li>
+                <li><strong>e1_flooding</strong> : Flooding</li>
+                <li><strong>e2_goback</strong> : Retour à l'origine</li>
+            </ul>
+            <h3>Mouvements :</h3>
+            <ul>
+                <li><strong>catoms3DRotate</strong> : Rotations 3D</li>
+                <li><strong>demoMotionsC3D</strong> : Mouvements Catoms3D</li>
+                <li><strong>sbReconf</strong> : Reconfiguration SmartBlocks</li>
+            </ul>
+            <h3>Avancés :</h3>
+            <ul>
+                <li><strong>csgCatoms3D</strong> : Formes CSG complexes</li>
+                <li><strong>BBbalance</strong> : Équilibrage</li>
+            </ul>
+        </div>
+        
+        <!-- Slide 20 -->
+        <div class="slide">
+            <h2>Installation</h2>
+            <h3>Ubuntu/Debian :</h3>
+            <pre><code>sudo apt-get install build-essential
+sudo apt-get install freeglut3-dev libglew-dev
+sudo apt-get install sbcl libmuparser-dev
+git submodule init && git submodule update
+make</code></pre>
+            <h3>macOS :</h3>
+            <pre><code>brew install freeglut glew sbcl muparser
+git submodule init && git submodule update
+make</code></pre>
+        </div>
+
+        
+        <!-- Slide 21 -->
+        <div class="slide">
+            <h2>Avantages de VisibleSim</h2>
+            <ul>
+                <li> <strong>Open Source</strong> : Code accessible et modifiable</li>
+                <li> <strong>Multi-plateformes</strong> : Linux, macOS, Windows</li>
+                <li> <strong>Flexible</strong> : 6 types de robots</li>
+                <li> <strong>Visuel</strong> : Visualisation 3D interactive</li>
+                <li> <strong>Performant</strong> : Milliers de modules</li>
+                <li> <strong>Extensible</strong> : Facile d'ajouter nouveaux types</li>
+                <li> <strong>Complet</strong> : C++ et Meld, horloges, targets, CSG</li>
+                <li> <strong>Testé</strong> : Système de régression automatisé</li>
+            </ul>
+        </div>
+        
+        <!-- Slide 22 -->
+        <div class="slide">
+            <h2>Cas d'Usage</h2>
+            <ul>
+                <li> <strong>Recherche académique</strong> en robotique modulaire</li>
+                <li> <strong>Développement d'algorithmes</strong> distribués</li>
+                <li> <strong>Test de protocoles</strong> de communication</li>
+                <li> <strong>Validation</strong> avant déploiement matériel</li>
+                <li> <strong>Enseignement</strong> en systèmes distribués</li>
+                <li> <strong>Prototypage</strong> de comportements collectifs</li>
+                <li> <strong>Simulation</strong> de reconfiguration</li>
+            </ul>
+        </div>
+
+        
+        <!-- Slide 23 -->
+        <div class="slide">
+            <h2>Conclusion</h2>
+            <div class="center">
+                <p style="font-size: 1.3em; margin: 30px 0;"><strong>VisibleSim</strong> est un outil puissant pour :</p>
+                <ul style="text-align: left; display: inline-block; font-size: 1.1em;">
+                    <li> La <strong>recherche</strong> en robotique modulaire</li>
+                    <li> Le <strong>développement</strong> d'algorithmes distribués</li>
+                    <li> L'<strong>enseignement</strong> en systèmes distribués</li>
+                    <li> La <strong>validation</strong> avant déploiement réel</li>
+                </ul>
+                <p style="font-size: 1.5em; margin-top: 40px; color: #667eea;"><strong>Open source, flexible, et performant !</strong></p>
+                <p style="margin-top: 30px;">~50,000 lignes de code • 6 familles de robots • 30+ exemples</p>
+            </div>
+        </div>
+        
+        <!-- Slide 24 -->
+        <div class="slide">
+            <div class="center">
+                <h1 style="margin-top: 100px;">Questions ?</h1>
+                <p style="font-size: 1.5em; margin: 40px 0;">Merci de votre attention !</p>
+                <div style="margin-top: 60px; text-align: left; display: inline-block;">
+                    <p><strong>Pour plus d'informations :</strong></p>
+                    <ul>
+                        <li>Documentation : <code>doc/</code></li>
+                        <li>Exemples : <code>applicationsSrc/</code></li>
+                        <li>Code source : <code>simulatorCore/src/</code></li>
+                    </ul>
+                </div>
+                <p style="font-size: 1.3em; margin-top: 40px; color: #667eea;">
+                    <strong>Prêt à simuler vos robots modulaires ! 🤖</strong>
+                </p>
+            </div>
+        </div>
+    </div>
+
+    
+    <div class="controls">
+        <button id="prev-btn" onclick="previousSlide()">◀ Précédent</button>
+        <button id="next-btn" onclick="nextSlide()">Suivant ▶</button>
+    </div>
+    
+    <script>
+        let currentSlide = 0;
+        const slides = document.querySelectorAll('.slide');
+        const totalSlides = slides.length;
+        
+        document.getElementById('total-slides').textContent = totalSlides;
+        
+        function showSlide(n) {
+            slides[currentSlide].classList.remove('active');
+            currentSlide = (n + totalSlides) % totalSlides;
+            slides[currentSlide].classList.add('active');
+            
+            document.getElementById('current-slide').textContent = currentSlide + 1;
+            
+            document.getElementById('prev-btn').disabled = currentSlide === 0;
+            document.getElementById('next-btn').disabled = currentSlide === totalSlides - 1;
+        }
+        
+        function nextSlide() {
+            if (currentSlide < totalSlides - 1) {
+                showSlide(currentSlide + 1);
+            }
+        }
+        
+        function previousSlide() {
+            if (currentSlide > 0) {
+                showSlide(currentSlide - 1);
+            }
+        }
+        
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowRight' || e.key === ' ') {
+                e.preventDefault();
+                nextSlide();
+            } else if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                previousSlide();
+            }
+        });
+        
+        showSlide(0);
+    </script>
+</body>
+</html>

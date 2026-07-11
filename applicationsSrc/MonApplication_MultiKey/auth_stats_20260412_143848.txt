@@ -1,0 +1,1 @@
+../../applicationsBin/MonApplication/run_auth_stats.sh: ligne 18: ./MonApplication: Aucun fichier ou dossier de ce nom
