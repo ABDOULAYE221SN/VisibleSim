@@ -269,11 +269,20 @@ void MonApplicationTestCode::algorithme1_InitierFalsifie(P2PNetworkInterface* de
 // ---------------------------------------------------------------------------
 // Algorithme 1 — SF-3/SF-4 : vérification
 // ---------------------------------------------------------------------------
-void MonApplicationTestCode::algorithme1_Verifier(P2PNetworkInterface* src, int /*liens*/,
+void MonApplicationTestCode::algorithme1_Verifier(P2PNetworkInterface* src, int liens,
                                                    const vector<uint8_t>& n1,
                                                    const vector<uint8_t>& x,
                                                    const vector<uint8_t>& K0) {
     if (voisinsAuthentifies.count(src)) return;
+
+    // Si le demandeur est déjà dans la structure, il doit utiliser l'Algo 2
+    if (liens > 0 && !infoSecurite.estModuleInitial && estDansStructure()) {
+        console << "  [INFO] M" << src->connectedInterface->hostBlock->blockId
+                << " est dans la structure (liens=" << liens
+                << ") — doit utiliser Algo2\n";
+        return;
+    }
+
     if (!estDansStructure()) {
         sendMessage(new MessageAuthEchec(), src, DELAI_TRANSMISSION, 0);
         return;
@@ -517,9 +526,13 @@ void MonApplicationTestCode::processLocalEvent(EventPtr pev) {
             auto msg = static_pointer_cast<NetworkInterfaceReceiveEvent>(pev)->message;
             P2PNetworkInterface* src = msg->destinationInterface;
             switch (msg->type) {
-                case MSG_AUTH_REQUEST:  surReceptionDemandeAuth(msg, src); break;
-                case MSG_KEY_CHALLENGE: surReceptionDefiCle(msg, src);     break;
-                case MSG_AUTH_ECHEC:    surReceptionAuthEchec(src);        break;
+                case MSG_AUTH_REQUEST:    surReceptionDemandeAuth(msg, src);   break;
+                case MSG_KEY_CHALLENGE:   surReceptionDefiCle(msg, src);       break;
+                case MSG_AUTH_ECHEC:      surReceptionAuthEchec(src);          break;
+                case MSG_PROOF_REQUEST:   surReceptionPreuveRequete(msg, src); break;
+                case MSG_PROOF_N1:        surReceptionPreuveN1(msg, src);      break;
+                case MSG_PROOF_RELAY:     surReceptionPreuveRelais(msg, src);  break;
+                case MSG_PROOF_CHALLENGE: surReceptionPreuveDefi(msg, src);    break;
             }
             break;
         }
@@ -652,10 +665,27 @@ void MonApplicationTestCode::onMotionEnd() {
             if (!ifaceValide(iface, module)) continue;
             MonApplicationTestCode* vc =
                 (MonApplicationTestCode*)iface->connectedInterface->hostBlock->blockCode;
-            if (vc->estDansStructure()) {
+            if (!vc->estDansStructure()) continue;
+
+            if (estDansStructure()) {
+                // Les deux dans la structure → Algo 2
+                for (int j = 0; j < 12; j++) {
+                    if (j == i) continue;
+                    P2PNetworkInterface* iface2 = module->getInterface(j);
+                    if (!ifaceValide(iface2, module)) continue;
+                    MonApplicationTestCode* vc2 =
+                        (MonApplicationTestCode*)iface2->connectedInterface->hostBlock->blockCode;
+                    if (vc2->estDansStructure() && !voisinsAuthentifies.count(iface2)) {
+                        algorithme2_Initier(iface, iface2);
+                        return;
+                    }
+                }
+                lancerProchainMobile();
+            } else {
+                // Nouveau module → Algo 1
                 algorithme1_Initier(iface);
-                return;
             }
+            return;
         }
         console << "[WARN] M" << module->blockId << " : aucun voisin authentifié — séquence continuée\n";
         lancerProchainMobile();
@@ -686,3 +716,198 @@ MessageDefiCle::MessageDefiCle(const vector<uint8_t>& _x1)
 
 MessageAuthEchec::MessageAuthEchec()
     : Message() { type = MSG_AUTH_ECHEC; }
+
+// ---------------------------------------------------------------------------
+// Constructeurs des messages Algorithme 2
+// ---------------------------------------------------------------------------
+MessagePreuveRequete::MessagePreuveRequete(int _ttl, const vector<uint8_t>& _x)
+    : Message(), ttl(_ttl), x(_x) { type = MSG_PROOF_REQUEST; }
+
+MessagePreuveN1::MessagePreuveN1(int _ttl, const vector<uint8_t>& _n1)
+    : Message(), ttl(_ttl), n1(_n1) { type = MSG_PROOF_N1; }
+
+MessagePreuveRelais::MessagePreuveRelais(int _ttl, const vector<uint8_t>& _xv)
+    : Message(), ttl(_ttl), xv(_xv) { type = MSG_PROOF_RELAY; }
+
+MessagePreuveDefi::MessagePreuveDefi(const vector<uint8_t>& _x1)
+    : Message(), x1(_x1) { type = MSG_PROOF_CHALLENGE; }
+
+// ---------------------------------------------------------------------------
+// Algorithme 2 — SF-1/SF-2 : initiation (côté 1M)
+// relais : voisin commun déjà lié à 1M (clé K1 partagée)
+// cible  : nouveau voisin dans la structure à authentifier
+// ---------------------------------------------------------------------------
+void MonApplicationTestCode::algorithme2_Initier(P2PNetworkInterface* relais,
+                                                  P2PNetworkInterface* cible) {
+    if (voisinsAuthentifies.count(cible) || authentificationsEnCours.count(cible)) return;
+
+    if (!clesVoisins.count(relais)) {
+        console << "[WARN] Algo2 : pas de clé avec le relais\n";
+        return;
+    }
+
+    vector<uint8_t> n0 = genererNonce160();
+    vector<uint8_t> n1 = H(n0);
+    vector<uint8_t> x  = xorVec(clesVoisins[relais], n0);  // x = K1 ⊕ n0
+
+    bID relaisId = relais->connectedInterface->hostBlock->blockId;
+    bID cibleId  = cible->connectedInterface->hostBlock->blockId;
+
+    console << "\n[t=" << getScheduler()->now() << "] *** ALGO2 SF-1 — M"
+            << module->blockId << " vers M" << cibleId
+            << " via relais M" << relaisId << " ***\n";
+    console << "  n0 = " << hexShort(n0) << "  n1 = H(n0) = " << hexShort(n1) << "\n";
+    console << "  x  = K1 XOR n0 = " << hexShort(x) << "\n";
+    console << "  >>> SF-2a : (ttl=2, x) -> M" << relaisId << "\n";
+    console << "  >>> SF-2b : (ttl=2, n1) -> M" << cibleId << "\n";
+
+    sendMessage(new MessagePreuveRequete(2, x),  relais, DELAI_TRANSMISSION, 0);
+    sendMessage(new MessagePreuveN1(2, n1),       cible,  DELAI_TRANSMISSION, 0);
+
+    n0Preuve[cible] = n0;
+    authentificationsEnCours.insert(cible);
+    module->setColor(ORANGE);
+}
+
+// ---------------------------------------------------------------------------
+// Algorithme 2 — SF-3a : relais reçoit (ttl, x), dérive n0, propage xv
+// ---------------------------------------------------------------------------
+void MonApplicationTestCode::algorithme2_TraiterRequete(P2PNetworkInterface* src,
+                                                         int ttl,
+                                                         const vector<uint8_t>& x) {
+    if (!estDansStructure()) return;
+    if (!clesVoisins.count(src)) {
+        console << "[WARN] Algo2 TraiterRequete : pas de clé avec M"
+                << src->connectedInterface->hostBlock->blockId << "\n";
+        return;
+    }
+
+    vector<uint8_t> n0 = xorVec(clesVoisins[src], x);  // n0 = K1 ⊕ x
+    bID srcId = src->connectedInterface->hostBlock->blockId;
+
+    console << "\n[t=" << getScheduler()->now() << "] *** ALGO2 SF-3a — M"
+            << module->blockId << " (relais) reçoit PROOF_REQUEST de M" << srcId << " ***\n";
+    console << "  n0 = K1 XOR x = " << hexShort(n0) << "\n";
+
+    // Propager xv = n0 ⊕ Kv à chaque voisin (sauf l'émetteur)
+    for (auto& kv : clesVoisins) {
+        if (kv.first == src || !kv.first->connectedInterface) continue;
+        vector<uint8_t> xv = xorVec(n0, kv.second);
+        bID smId = kv.first->connectedInterface->hostBlock->blockId;
+        console << "  >>> SF-3 relais : xv -> M" << smId << "\n";
+        sendMessage(new MessagePreuveRelais(ttl - 1, xv), kv.first, DELAI_TRANSMISSION, 0);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Algorithme 2 — SF-3b : cible (2M) reçoit (ttl, n1) de 1M, mémorise n1
+// ---------------------------------------------------------------------------
+void MonApplicationTestCode::algorithme2_TraiterN1(P2PNetworkInterface* src,
+                                                    int /*ttl*/,
+                                                    const vector<uint8_t>& n1) {
+    if (!estDansStructure()) return;
+    bID srcId = src->connectedInterface->hostBlock->blockId;
+    console << "\n[t=" << getScheduler()->now() << "] *** ALGO2 SF-3b — M"
+            << module->blockId << " reçoit PROOF_N1 de M" << srcId << " ***\n";
+    console << "  n1 = " << hexShort(n1) << " (mémorisé, attente xv)\n";
+    n1AttenteCible[src] = n1;
+}
+
+// ---------------------------------------------------------------------------
+// Algorithme 2 — SF-4 : cible (2M) reçoit xv du relais, vérifie H(n0)==n1
+// Si OK : génère K2, calcule x1=K2⊕n0, K3=HL(K2), envoie x1 à 1M
+// ---------------------------------------------------------------------------
+void MonApplicationTestCode::algorithme2_TraiterRelais(P2PNetworkInterface* src,
+                                                        int /*ttl*/,
+                                                        const vector<uint8_t>& xv) {
+    if (!estDansStructure() || !clesVoisins.count(src)) return;
+
+    vector<uint8_t> n0 = xorVec(clesVoisins[src], xv);  // n0 = Kv ⊕ xv
+    bID srcId = src->connectedInterface->hostBlock->blockId;
+
+    console << "\n[t=" << getScheduler()->now() << "] *** ALGO2 SF-4 — M"
+            << module->blockId << " reçoit PROOF_RELAY de M" << srcId << " ***\n";
+    console << "  n0 = Kv XOR xv = " << hexShort(n0) << "\n";
+
+    // Trouver l'initiateur dont H(n0) == n1 mémorisé
+    P2PNetworkInterface* initiateur = nullptr;
+    for (auto& kv : n1AttenteCible) {
+        if (H(n0) == kv.second) { initiateur = kv.first; break; }
+    }
+    if (!initiateur) {
+        console << "  [ECHEC] Aucun n1 correspondant — preuve invalide\n";
+        return;
+    }
+
+    bID initId = initiateur->connectedInterface->hostBlock->blockId;
+    console << "  H(n0) == n1 : preuve validée pour M" << initId << "\n";
+    n1AttenteCible.erase(initiateur);
+
+    // SF-5 : K2 aléatoire, x1 = K2 ⊕ n0, K3 = HL(K2)
+    vector<uint8_t> K2 = genererNonce160();
+    vector<uint8_t> x1 = xorVec(K2, n0);
+    vector<uint8_t> K3 = HL(K2);
+
+    clesVoisins[initiateur]         = K3;
+    voisinsAuthentifies[initiateur] = true;
+    infoSecurite.liensStructure++;
+
+    console << "  K2 = " << hexShort(K2) << "  K3 = HL(K2) = " << hexShort(K3) << "\n";
+    console << "  >>> SF-5 : x1 -> M" << initId << "\n";
+    sendMessage(new MessagePreuveDefi(x1), initiateur, DELAI_TRANSMISSION, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Algorithme 2 — SF-6 : initiateur (1M) reçoit x1, dérive K2 et K3
+// ---------------------------------------------------------------------------
+void MonApplicationTestCode::algorithme2_Completer(P2PNetworkInterface* src,
+                                                    const vector<uint8_t>& x1) {
+    if (!n0Preuve.count(src)) {
+        console << "[WARN] Algo2 SF-6 : n0 introuvable\n";
+        return;
+    }
+
+    vector<uint8_t> n0 = n0Preuve[src];
+    vector<uint8_t> K2 = xorVec(x1, n0);
+    vector<uint8_t> K3 = HL(K2);
+    bID srcId = src->connectedInterface->hostBlock->blockId;
+
+    console << "\n[t=" << getScheduler()->now() << "] *** ALGO2 SF-6 — M"
+            << module->blockId << " reçoit PROOF_CHALLENGE de M" << srcId << " ***\n";
+    console << "  K2 = x1 XOR n0 = " << hexShort(K2) << "\n";
+    console << "  K3 = HL(K2)    = " << hexShort(K3) << "\n";
+    console << "  ==> AUTHENTIFICATION MUTUELLE REUSSIE (Algo2)\n";
+
+    clesVoisins[src]         = K3;
+    voisinsAuthentifies[src] = true;
+    infoSecurite.liensStructure++;
+    n0Preuve.erase(src);
+    authentificationsEnCours.erase(src);
+
+    module->setColor(GREEN);
+    lancerProchainMobile();
+}
+
+// ---------------------------------------------------------------------------
+// Gestionnaires de messages Algorithme 2
+// ---------------------------------------------------------------------------
+void MonApplicationTestCode::surReceptionPreuveRequete(shared_ptr<Message> msg,
+                                                        P2PNetworkInterface* src) {
+    auto* m = static_cast<MessagePreuveRequete*>(msg.get());
+    algorithme2_TraiterRequete(src, m->ttl, m->x);
+}
+void MonApplicationTestCode::surReceptionPreuveN1(shared_ptr<Message> msg,
+                                                   P2PNetworkInterface* src) {
+    auto* m = static_cast<MessagePreuveN1*>(msg.get());
+    algorithme2_TraiterN1(src, m->ttl, m->n1);
+}
+void MonApplicationTestCode::surReceptionPreuveRelais(shared_ptr<Message> msg,
+                                                       P2PNetworkInterface* src) {
+    auto* m = static_cast<MessagePreuveRelais*>(msg.get());
+    algorithme2_TraiterRelais(src, m->ttl, m->xv);
+}
+void MonApplicationTestCode::surReceptionPreuveDefi(shared_ptr<Message> msg,
+                                                     P2PNetworkInterface* src) {
+    auto* m = static_cast<MessagePreuveDefi*>(msg.get());
+    algorithme2_Completer(src, m->x1);
+}

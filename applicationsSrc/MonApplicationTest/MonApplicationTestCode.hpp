@@ -19,9 +19,13 @@ using namespace Catoms3D;
 #define DELAI_TRANSMISSION  100
 #define MAX_STEPS            50
 
-static const int MSG_AUTH_REQUEST  = 2001;
-static const int MSG_KEY_CHALLENGE = 2002;
-static const int MSG_AUTH_ECHEC    = 2006;
+static const int MSG_AUTH_REQUEST   = 2001;
+static const int MSG_KEY_CHALLENGE  = 2002;
+static const int MSG_AUTH_ECHEC     = 2006;
+static const int MSG_PROOF_REQUEST  = 2003; // Algo2 SF-2a : 1M → iM  (x masqué)
+static const int MSG_PROOF_N1       = 2004; // Algo2 SF-2b : 1M → 2M  (n1)
+static const int MSG_PROOF_RELAY    = 2005; // Algo2 SF-3  : iM → sM  (xv propagé)
+static const int MSG_PROOF_CHALLENGE= 2007; // Algo2 SF-5  : 2M → 1M  (x1)
 
 enum EtatSecurite {
     ETAT_NON_LIE = 0,
@@ -49,7 +53,7 @@ public:
     ~MessageDemandeAuth() {}
 };
 
-// SF-4 : iM → nM
+// SF-4 : vérificateur → nM
 class MessageDefiCle : public Message {
 public:
     std::vector<uint8_t> x1;
@@ -57,11 +61,46 @@ public:
     ~MessageDefiCle() {}
 };
 
-// Echec d'authentification : iM → nM
+// Echec d'authentification
 class MessageAuthEchec : public Message {
 public:
     MessageAuthEchec();
     ~MessageAuthEchec() {}
+};
+
+// Algo 2 SF-2a : 1M → iM  (ttl, x = K1 ⊕ n0)
+class MessagePreuveRequete : public Message {
+public:
+    int ttl;
+    std::vector<uint8_t> x;
+    MessagePreuveRequete(int _ttl, const std::vector<uint8_t>& _x);
+    ~MessagePreuveRequete() {}
+};
+
+// Algo 2 SF-2b : 1M → 2M  (ttl, n1)
+class MessagePreuveN1 : public Message {
+public:
+    int ttl;
+    std::vector<uint8_t> n1;
+    MessagePreuveN1(int _ttl, const std::vector<uint8_t>& _n1);
+    ~MessagePreuveN1() {}
+};
+
+// Algo 2 SF-3 : iM → sM  (ttl, xv = n0 ⊕ Kv)
+class MessagePreuveRelais : public Message {
+public:
+    int ttl;
+    std::vector<uint8_t> xv;
+    MessagePreuveRelais(int _ttl, const std::vector<uint8_t>& _xv);
+    ~MessagePreuveRelais() {}
+};
+
+// Algo 2 SF-5 : 2M → 1M  (x1 = K2 ⊕ n0)
+class MessagePreuveDefi : public Message {
+public:
+    std::vector<uint8_t> x1;
+    explicit MessagePreuveDefi(const std::vector<uint8_t>& _x1);
+    ~MessagePreuveDefi() {}
 };
 
 class MonApplicationTestCode : public Catoms3DBlockCode {
@@ -81,6 +120,10 @@ private:
     std::map<P2PNetworkInterface*, bool>                 voisinsAuthentifies;
     std::set<P2PNetworkInterface*>                       authentificationsEnCours;
     std::map<P2PNetworkInterface*, std::vector<uint8_t>> n0EnAttente;
+    // Algo 2 — côté initiateur (1M)
+    std::map<P2PNetworkInterface*, std::vector<uint8_t>> n0Preuve;
+    // Algo 2 — côté cible (2M) : stocke n1 reçu de 1M
+    std::map<P2PNetworkInterface*, std::vector<uint8_t>> n1AttenteCible;
 
 public:
     MonApplicationTestCode(Catoms3DBlock *host);
@@ -115,12 +158,28 @@ public:
     void algorithme1_Completer(P2PNetworkInterface* src,
                                const std::vector<uint8_t>& x1);
 
+    // Algorithme 2 — deux modules déjà dans la structure se connectent
+    void algorithme2_Initier(P2PNetworkInterface* relais,
+                             P2PNetworkInterface* cible);
+    void algorithme2_TraiterRequete(P2PNetworkInterface* src, int ttl,
+                                   const std::vector<uint8_t>& x);
+    void algorithme2_TraiterN1(P2PNetworkInterface* src, int ttl,
+                               const std::vector<uint8_t>& n1);
+    void algorithme2_TraiterRelais(P2PNetworkInterface* src, int ttl,
+                                  const std::vector<uint8_t>& xv);
+    void algorithme2_Completer(P2PNetworkInterface* src,
+                               const std::vector<uint8_t>& x1);
+
     void lancerReconfiguration();
     void lancerProchainMobile();
 
     void surReceptionDemandeAuth(std::shared_ptr<Message> msg, P2PNetworkInterface* src);
     void surReceptionDefiCle(std::shared_ptr<Message> msg, P2PNetworkInterface* src);
     void surReceptionAuthEchec(P2PNetworkInterface* src);
+    void surReceptionPreuveRequete(std::shared_ptr<Message> msg, P2PNetworkInterface* src);
+    void surReceptionPreuveN1(std::shared_ptr<Message> msg, P2PNetworkInterface* src);
+    void surReceptionPreuveRelais(std::shared_ptr<Message> msg, P2PNetworkInterface* src);
+    void surReceptionPreuveDefi(std::shared_ptr<Message> msg, P2PNetworkInterface* src);
 
     static BlockCode *buildNewBlockCode(BuildingBlock *host) {
         return new MonApplicationTestCode((Catoms3DBlock*)host);

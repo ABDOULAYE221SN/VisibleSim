@@ -1,10 +1,19 @@
 /**
  * SCupCatoms3DTestCode.cpp
- * S-CUP — variante de test avec module falsifié
+ * S-CUP — variante de test avec module falsifié en (4,2,2)
  *
- * Le module FAKE en (5,2,2) s'intercale après l'arrivée de iCH à (5,3,2).
- * Il envoie un K0 aléatoire invalide → AUTH_ECHEC → part en rouge vers (9,3,2).
- * La séquence légitime reprend ensuite normalement.
+ * Cluster 1 (JAUNE) : iCH=(2,2,2), CM1=(2,3,2), CM2=(3,3,2)
+ * Cluster 2 (BLEU)  : CH2=(3,2,2), CM3=(4,1,2), CM4=(4,3,2)
+ * FAKE               : CM5=(4,2,2)
+ *
+ * Séquence :
+ *   0. iCH  (2,2,2)→(5,3,2)    [pas d'auth]
+ *   1. CH2  (3,2,2)→(5,2,2)    [auth → BLEU]
+ *   2. CM1  (2,3,2)→(6,3,2)    [auth → JAUNE]
+ *   3. CH2  (5,2,2)→(6,2,2)    [auth → BLEU]
+ *   4. CM2  (3,3,2)→(7,3,2) et CM3 (4,1,2)→(6,1,2)  [simultané]
+ *   5. CM5  (4,2,2)→(6,0,2)    [FAKE : auth echec → ROUGE → retour (3,3,2)]
+ *   6. CM4  (4,3,2)→(6,0,2)    [auth → BLEU]
  */
 #include "SCupCatoms3DTestCode.h"
 #include "../../simulatorCore/src/spongent160.h"
@@ -18,37 +27,39 @@ using namespace std;
 using namespace Catoms3D;
 
 // ---------------------------------------------------------------------------
-// Positions initiales des 7 modules
+// Positions initiales
 // ---------------------------------------------------------------------------
 static const Cell3DPosition POS_ICH (2,2,2);
 static const Cell3DPosition POS_CH2 (3,2,2);
 static const Cell3DPosition POS_CM1 (2,3,2);
 static const Cell3DPosition POS_CM2 (3,3,2);
-static const Cell3DPosition POS_CM3 (4,2,2);
+static const Cell3DPosition POS_CM3 (4,1,2);  // CM3 legitime (cluster 2)
 static const Cell3DPosition POS_CM4 (4,3,2);
-static const Cell3DPosition POS_FAKE(5,2,2);  // module falsifié
+static const Cell3DPosition POS_CM5 (4,2,2);  // module falsifié
 
 // ---------------------------------------------------------------------------
-// Positions cibles légitimes
+// Positions cibles
 // ---------------------------------------------------------------------------
 static const Cell3DPosition TARGET_ICH  (5,3,2);
-static const Cell3DPosition TARGET_CH2  (5,2,2);   // 1er déplacement CH2
-static const Cell3DPosition TARGET_CH2_2(6,2,2);   // 2e déplacement CH2
+static const Cell3DPosition TARGET_CH2  (5,2,2);
+static const Cell3DPosition TARGET_CH2_2(6,2,2);
 static const Cell3DPosition TARGET_CM1  (6,3,2);
 static const Cell3DPosition TARGET_CM2  (7,3,2);
 static const Cell3DPosition TARGET_CM3  (6,1,2);
 static const Cell3DPosition TARGET_CM4  (6,0,2);
-static const Cell3DPosition TARGET_FAKE (9,3,2);   // retraite du module falsifié
+static const Cell3DPosition TARGET_CM5  (6,0,2);   // cible du FAKE (même que CM4)
+static const Cell3DPosition TARGET_FAKE_RETURN(4,2,2); // position de départ du FAKE
 
 // ---------------------------------------------------------------------------
 // Etat global de reconfiguration
 // ---------------------------------------------------------------------------
-static int  nextStep         = 0;
-static int  simultaneousDone = 0;
-static bool fakeDone         = false;  // true une fois le module falsifié traité
+static int  nextStep             = 0;
+static int  simultaneousDone     = 0; // arrivées étape 4
+static int  simultaneousAuthDone = 0; // auth réussies étape 4
+static bool fakeHandled          = false; // true après traitement de l'étape 5
 
 // ---------------------------------------------------------------------------
-// Helper
+// Helper : interface valide
 // ---------------------------------------------------------------------------
 static bool ifaceValideT(P2PNetworkInterface* iface, BuildingBlock* self) {
     if (!iface || !iface->connectedInterface) return false;
@@ -167,24 +178,27 @@ void SCupCatoms3DTestCode::startup() {
         console << "[iCH] M" << module->blockId << " = Initial Cluster Head (JAUNE)\n";
         getScheduler()->schedule(
             new InterruptionEvent<unsigned int>(getScheduler()->now() + 100, module, 0));
-    } else if (module->position == POS_FAKE) {
+
+    } else if (module->position == POS_CM5) {
         role        = ROLE_FAKE;
         isFalsified = true;
-        myHome      = POS_FAKE;
-        myTarget    = TARGET_FAKE;
-        module->setColor(GREY);
-        console << "[FAKE] M" << module->blockId << " = module falsifié en attente (GRIS)\n";
+        myTarget    = TARGET_CM5;
+        module->setColor(BLUE);  // Cluster 2
+        console << "[FAKE] M" << module->blockId << " = module falsifie en (4,2,2) cluster 2 (BLEU)\n";
+
     } else if (module->position == POS_CH2) {
         role = ROLE_CH2;
         module->setColor(BLUE);
         myTarget = TARGET_CH2;
         console << "[CH2] M" << module->blockId << " = Cluster Head 2 (BLEU)\n";
+
     } else {
         role = ROLE_CM;
         if (module->position == POS_CM1 || module->position == POS_CM2)
             module->setColor(YELLOW);
         else
             module->setColor(BLUE);
+
         if      (module->position == POS_CM1) myTarget = TARGET_CM1;
         else if (module->position == POS_CM2) myTarget = TARGET_CM2;
         else if (module->position == POS_CM3) myTarget = TARGET_CM3;
@@ -197,7 +211,7 @@ void SCupCatoms3DTestCode::startup() {
 // Reconfiguration séquentielle
 // ---------------------------------------------------------------------------
 void SCupCatoms3DTestCode::lancerReconfiguration() {
-    nextStep = 0; simultaneousDone = 0; fakeDone = false;
+    nextStep = 0; simultaneousDone = 0; simultaneousAuthDone = 0; fakeHandled = false;
     lancerProchainMobile();
 }
 
@@ -208,7 +222,6 @@ void SCupCatoms3DTestCode::lancerProchainMobile() {
         for (auto& kv : world->buildingBlocksMap) {
             if (kv.second->position == pos) {
                 SCupCatoms3DTestCode* m = (SCupCatoms3DTestCode*)kv.second->blockCode;
-                if (m->isFalsified) continue;  // ne jamais lancer le fake ici
                 m->myTarget = target;
                 console << "\n[Reconf etape " << nextStep << "] M" << m->module->blockId
                         << " depuis " << pos << " vers " << target << "\n";
@@ -226,12 +239,6 @@ void SCupCatoms3DTestCode::lancerProchainMobile() {
             nextStep++;
             lancerModule(POS_ICH, TARGET_ICH);
             break;
-
-        // Après l'arrivée de iCH (case 1) : intercepter avec le module falsifié
-        // Le fake part de (5,2,2) — position adjacente à TARGET_ICH
-        // La transition vers case 1 est déclenchée par onMotionEnd() de iCH
-        // qui appelle lancerFake() → puis continue avec case 1
-
         case 1:  // CH2 (3,2,2) → (5,2,2)
             nextStep++;
             lancerModule(POS_CH2, TARGET_CH2);
@@ -256,18 +263,23 @@ void SCupCatoms3DTestCode::lancerProchainMobile() {
                 }
             }
             break;
-        case 4:  // CM2 (3,3,2) → (7,3,2) ET CM3 (4,2,2) → (6,1,2) simultané
+        case 4:  // CM2 (3,3,2)→(7,3,2) ET CM3 (4,1,2)→(6,1,2) simultané
             nextStep++;
-            simultaneousDone = 0;
+            simultaneousDone     = 0;
+            simultaneousAuthDone = 0;
             lancerModule(POS_CM2, TARGET_CM2);
             lancerModule(POS_CM3, TARGET_CM3);
             break;
-        case 5:  // CM4 (4,3,2) → (6,0,2)
+        case 5:  // CM5 FAKE (4,2,2) → (6,0,2) — auth échouera
+            nextStep++;
+            lancerModule(POS_CM5, TARGET_CM5);
+            break;
+        case 6:  // CM4 (4,3,2) → (6,0,2)
             nextStep++;
             lancerModule(POS_CM4, TARGET_CM4);
             break;
         default:
-            console << "\n[S-CUP TEST] Reconfiguration terminee. Module falsifié rejeté avec succès.\n";
+            console << "\n[S-CUP TEST] Reconfiguration terminee. Module falsifie rejete.\n";
             break;
     }
 }
@@ -286,7 +298,9 @@ void SCupCatoms3DTestCode::algorithm1_Initiate(P2PNetworkInterface* dest) {
     bID destId = dest->connectedInterface->hostBlock->blockId;
 
     console << "\n[t=" << ts << "] *** S-CUP ALGO1 SF-1 — M" << module->blockId << " ***\n";
-    console << "  n1  = " << hexShort(n1) << "  K0 = " << hexShort(K0) << "\n";
+    console << "  n1  = H(n0)         = " << hexShort(n1) << "\n";
+    console << "  K0  = HL(n0 mod Nb) = " << hexShort(K0) << "\n";
+    console << "  x   = Ts XOR n0     = " << hexShort(x)  << "\n";
     console << "  >>> SF-2 : AUTH_REQUEST -> M" << destId << "\n";
 
     sendMessage(new MessageAuthRequestT(n1, x, K0), dest, SCUP_TRANSMISSION_DELAY, 0);
@@ -310,7 +324,7 @@ void SCupCatoms3DTestCode::algorithm1_InitiateFalsified(P2PNetworkInterface* des
     bID destId = dest->connectedInterface->hostBlock->blockId;
 
     console << "\n[t=" << ts << "] *** [FAKE] ALGO1 SF-1 — M" << module->blockId
-            << " (module falsifié) ***\n";
+            << " (module falsifie) ***\n";
     console << "  n1  = " << hexShort(n1) << "\n";
     console << "  K0  = " << hexShort(K0_fake) << "  !! K0 ALEATOIRE INVALIDE !!\n";
     console << "  >>> SF-2 : AUTH_REQUEST (falsifie) -> M" << destId << "\n";
@@ -361,7 +375,7 @@ void SCupCatoms3DTestCode::algorithm1_Verify(P2PNetworkInterface* src,
     // Vérification K0 — échouera si module falsifié
     if (HL(n0_prime) != K0) {
         console << "  [ECHEC] K0 INVALIDE — code source non conforme !\n";
-        console << "  >>> AUTH_ECHEC envoyé à M" << srcId << " (module rejeté)\n";
+        console << "  >>> AUTH_ECHEC envoye a M" << srcId << " (module rejete)\n";
         sendMessage(new MessageAuthEchecT(), src, SCUP_TRANSMISSION_DELAY, 0);
         return;
     }
@@ -406,12 +420,21 @@ void SCupCatoms3DTestCode::algorithm1_Complete(P2PNetworkInterface* src,
     pendingN0.erase(src);
     ongoingAuthentications.erase(src);
 
-    bool isCluster2 = (role == ROLE_CH2 || myTarget == TARGET_CM3 || myTarget == TARGET_CM4);
+    // Couleur selon cluster
+    bool isCluster2 = (role == ROLE_CH2
+                       || myTarget == TARGET_CM3
+                       || myTarget == TARGET_CM4);
     module->setColor(isCluster2 ? BLUE : YELLOW);
-    console << "  Module " << module->blockId << " -> "
+    console << "  Module M" << module->blockId << " -> "
             << (isCluster2 ? "BLEU (cluster 2)" : "JAUNE (cluster 1)") << "\n";
 
-    lancerProchainMobile();
+    // Etape 4 simultanée : attendre les 2 auth avant de continuer
+    if (myTarget == TARGET_CM2 || myTarget == TARGET_CM3) {
+        simultaneousAuthDone++;
+        if (simultaneousAuthDone >= 2) lancerProchainMobile();
+    } else {
+        lancerProchainMobile();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -438,14 +461,14 @@ void SCupCatoms3DTestCode::onAuthEchecReceived(P2PNetworkInterface* src) {
     if (isFalsified) {
         console << "  [FAKE] Code source NON CONFORME — module REJETE\n";
         console << "  [FAKE] M" << module->blockId
-                << " part en rouge vers " << TARGET_FAKE << "\n";
+                << " passe en ROUGE et retourne vers sa position de depart " << TARGET_FAKE_RETURN << "\n";
         module->setColor(RED);
         isReturning = true;
-        fakeDone    = true;
+        fakeHandled = true;
         visited.clear();
         visited.insert(module->position);
         moveSteps = 0;
-        tryMoveToward(TARGET_FAKE);
+        tryMoveToward(TARGET_FAKE_RETURN);
     } else {
         module->setColor(RED);
         console << "  Authentification refusee — M" << module->blockId << " passe en rouge\n";
@@ -489,7 +512,7 @@ bool SCupCatoms3DTestCode::tryMoveToward(const Cell3DPosition& goal) {
         int nbVoisins = 0;
         for (auto& np : lattice->getNeighborhood(fp))
             if (lattice->cellHasBlock(np) && np != module->position) nbVoisins++;
-        // le module falsifié en retraite peut se déconnecter de la structure
+        // Le module falsifié en retraite peut se déconnecter
         if (!isFalsified && nbVoisins < 1) continue;
         double d = (double)((fp[0]-goal[0])*(fp[0]-goal[0])
                           + (fp[1]-goal[1])*(fp[1]-goal[1])
@@ -519,23 +542,24 @@ bool SCupCatoms3DTestCode::tryMoveToward(const Cell3DPosition& goal) {
 // Fin de déplacement
 // ---------------------------------------------------------------------------
 void SCupCatoms3DTestCode::onMotionEnd() {
+
     // --- Module falsifié en retraite ---
     if (isReturning) {
-        if (module->position == TARGET_FAKE) {
+        if (module->position == TARGET_FAKE_RETURN) {
             console << "[FAKE] M" << module->blockId
-                    << " arrive a " << TARGET_FAKE << " (hors structure) — reste en rouge\n";
+                    << " retourne a " << TARGET_FAKE_RETURN << " (hors structure) — reste en ROUGE\n";
             module->setColor(RED);
             isReturning = false;
-            // La séquence légitime continue : relancer lancerProchainMobile depuis iCH
+            // La séquence légitime continue : étape 6 (CM4)
             auto world = BaseSimulator::getWorld();
             for (auto& kv : world->buildingBlocksMap) {
                 SCupCatoms3DTestCode* m = (SCupCatoms3DTestCode*)kv.second->blockCode;
                 if (m->security.isICH) { m->lancerProchainMobile(); return; }
             }
         } else {
-            if (!tryMoveToward(TARGET_FAKE)) {
+            if (!tryMoveToward(TARGET_FAKE_RETURN)) {
                 visited.clear(); visited.insert(module->position);
-                moveSteps = 0; tryMoveToward(TARGET_FAKE);
+                moveSteps = 0; tryMoveToward(TARGET_FAKE_RETURN);
             }
         }
         return;
@@ -551,38 +575,13 @@ void SCupCatoms3DTestCode::onMotionEnd() {
 
         console << "[S-CUP] M" << module->blockId << " arrive a " << myTarget << "\n";
 
-        // iCH arrivé : intercaler le module falsifié avant de continuer
-        if (myTarget == TARGET_ICH && !fakeDone) {
-            console << "\n[S-CUP TEST] iCH arrive — lancement du module falsifie\n";
-            auto world = BaseSimulator::getWorld();
-            for (auto& kv : world->buildingBlocksMap) {
-                SCupCatoms3DTestCode* fake = (SCupCatoms3DTestCode*)kv.second->blockCode;
-                if (fake->isFalsified && fake->module->position == POS_FAKE) {
-                    // Le fake est déjà adjacent à TARGET_ICH, il tente l'auth directement
-                    console << "[FAKE] M" << fake->module->blockId
-                            << " tente authentification falsifiee vers M"
-                            << module->blockId << "\n";
-                    // Trouver l'interface vers iCH
-                    for (int i = 0; i < 12; i++) {
-                        P2PNetworkInterface* iface = fake->module->getInterface(i);
-                        if (!fake->isInterfaceValid(iface)) continue;
-                        if (iface->connectedInterface->hostBlock->position == TARGET_ICH) {
-                            fake->algorithm1_InitiateFalsified(iface);
-                            return;
-                        }
-                    }
-                    // Pas encore adjacent : le faire avancer vers TARGET_ICH d'abord
-                    fake->visited.clear();
-                    fake->visited.insert(fake->module->position);
-                    fake->moveSteps = 0;
-                    fake->myTarget  = TARGET_ICH;  // s'approcher de iCH
-                    fake->tryMoveToward(TARGET_ICH);
-                    return;
-                }
-            }
+        // --- iCH arrivé : lance directement l'étape suivante ---
+        if (myTarget == TARGET_ICH) {
+            lancerProchainMobile();
+            return;
         }
 
-        // Etape 4 simultanée : CM2 et CM3
+        // --- Etape 4 simultanée : CM2 et CM3 ---
         if (myTarget == TARGET_CM2 || myTarget == TARGET_CM3) {
             simultaneousDone++;
             for (int i = 0; i < 12; i++) {
@@ -596,16 +595,44 @@ void SCupCatoms3DTestCode::onMotionEnd() {
             return;
         }
 
-        // iCH arrivé (après fake traité) ou autres modules
-        if (myTarget == TARGET_ICH) { lancerProchainMobile(); return; }
+        // --- Etape 5 : CM5 FAKE arrive à sa cible → tente auth falsifiée ---
+        if (myTarget == TARGET_CM5 && isFalsified) {
+            console << "\n[S-CUP TEST] CM5 FAKE arrive a " << TARGET_CM5
+                    << " — tentative d'authentification falsifiee\n";
+            for (int i = 0; i < 12; i++) {
+                P2PNetworkInterface* iface = module->getInterface(i);
+                if (!isInterfaceValid(iface)) continue;
+                SCupCatoms3DTestCode* vc =
+                    (SCupCatoms3DTestCode*)iface->connectedInterface->hostBlock->blockCode;
+                if (vc->estDansStructure()) {
+                    algorithm1_InitiateFalsified(iface);
+                    return;
+                }
+            }
+            // Aucun voisin dans la structure : rejeter directement
+            console << "  [FAKE] Aucun voisin dans la structure — module rejete\n";
+            module->setColor(RED);
+            isReturning = true;
+            fakeHandled = true;
+            visited.clear(); visited.insert(module->position);
+            moveSteps = 0;
+            tryMoveToward(TARGET_FAKE_RETURN);
+            return;
+        }
 
-        // Tous les autres : s'authentifier auprès d'un voisin dans la structure
+        // --- Tous les autres modules légitimes : s'authentifier ---
         for (int i = 0; i < 12; i++) {
             P2PNetworkInterface* iface = module->getInterface(i);
             if (!isInterfaceValid(iface)) continue;
             SCupCatoms3DTestCode* vc =
                 (SCupCatoms3DTestCode*)iface->connectedInterface->hostBlock->blockCode;
-            if (vc->estDansStructure()) { algorithm1_Initiate(iface); return; }
+            if (vc->estDansStructure()) {
+                console << "[S-CUP] M" << module->blockId
+                        << " initie AUTH vers M"
+                        << iface->connectedInterface->hostBlock->blockId << "\n";
+                algorithm1_Initiate(iface);
+                return;
+            }
         }
         console << "[WARN] M" << module->blockId << " : aucun voisin dans la structure\n";
         lancerProchainMobile();

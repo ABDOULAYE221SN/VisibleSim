@@ -2,10 +2,19 @@
  * SCupCatoms3DTestCode.h
  * Protocole S-CUP — variante de test avec module falsifié
  *
- * Identique à scupCatoms3D avec un 7e module en (5,2,2) qui s'intercale
- * après l'arrivée de iCH, envoie un K0 aléatoire (invalide), reçoit
- * AUTH_ECHEC, se met en rouge et part vers (9,3,2) hors structure.
- * La reconfiguration légitime reprend ensuite normalement.
+ * 7 modules, 2 clusters :
+ *   Cluster 1 (JAUNE) : iCH=(2,2,2), CM1=(2,3,2), CM2=(3,3,2)
+ *   Cluster 2 (BLEU)  : CH2=(3,2,2), CM3=(4,1,2), CM4=(4,3,2), CM5=(4,2,2) FAKE
+ *   Module FAKE        : CM5=(4,2,2) — code source non conforme (cluster 2, BLEU)
+ *
+ * Séquence (7 étapes) :
+ *   0. iCH  (2,2,2) → (5,3,2)   [pas d'auth]
+ *   1. CH2  (3,2,2) → (5,2,2)   [auth → BLEU]
+ *   2. CM1  (2,3,2) → (6,3,2)   [auth → JAUNE]
+ *   3. CH2  (5,2,2) → (6,2,2)   [auth → BLEU]
+ *   4. CM2  (3,3,2) → (7,3,2) et CM3 (4,1,2) → (6,1,2)  [simultané, auth → JAUNE/BLEU]
+ *   5. CM5  (4,2,2) → (6,0,2)   [FAKE : auth ECHEC → ROUGE → retour (3,3,2)]
+ *   6. CM4  (4,3,2) → (6,0,2)   [auth → BLEU]
  */
 #ifndef SCUP_CATOMS3D_TEST_CODE_H_
 #define SCUP_CATOMS3D_TEST_CODE_H_
@@ -85,12 +94,11 @@ class SCupCatoms3DTestCode : public Catoms3DBlockCode {
 private:
     Catoms3DBlock* module;
     SecurityInfo   security;
-    ModuleRole     role       = ROLE_NONE;
+    ModuleRole     role        = ROLE_NONE;
     bool           isFalsified = false;
-    bool           isReturning = false;
+    bool           isReturning = false;  // true quand le FAKE repart vers sa position de retrait
 
     Cell3DPosition myTarget;
-    Cell3DPosition myHome;
     std::set<Cell3DPosition> visited;
     int  moveSteps = 0;
 
@@ -124,7 +132,7 @@ public:
     std::string          hexShort(const std::vector<uint8_t>& v, int n = 4) const;
 
     // Algorithme 1 — version normale
-    void algorithm1_Initiate        (P2PNetworkInterface* dest);
+    void algorithm1_Initiate(P2PNetworkInterface* dest);
     // Algorithme 1 — version falsifiée (K0 aléatoire invalide)
     void algorithm1_InitiateFalsified(P2PNetworkInterface* dest);
 
